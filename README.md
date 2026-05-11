@@ -1,6 +1,6 @@
-# WhisperClock for Pebble
+# WhisperClock for PebbleOS
 
-**WhisperClock** is a highly customizable, natural-sounding speaking clock app for Pebble smartwatches. 
+**WhisperClock** is a highly customizable, natural-sounding speaking clock app for Pebble smartwatches that have speakers (currently: Pebble Time 2). 
 
 ## 🎯 Purpose
 Traditional smartwatch speaking clocks rely on robotic, highly synthesized Text-to-Speech (TTS) engines. WhisperClock takes a radically different approach by using a custom **"Stitched Audio"** engine. 
