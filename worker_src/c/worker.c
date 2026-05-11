@@ -37,15 +37,8 @@ static AccelData s_flat_live_data[MAX_BUFFER_SIZE];
 static CustomAccelData s_centered_live[MAX_BUFFER_SIZE];
 static CustomAccelData s_centered_saved[MAX_BUFFER_SIZE];
 
-static void get_time_string(char* buf, int buf_size) {
-  time_t now = time(NULL);
-  struct tm *t = localtime(&now);
-  if (t != NULL) {
-    snprintf(buf, buf_size, "[%02d:%02d:%02d]", t->tm_hour, t->tm_min, t->tm_sec);
-  } else {
-    snprintf(buf, buf_size, "[TS:%ld]", (long)now);
-  }
-}
+// Removed get_time_string() as string formatting in the background is expensive
+// and APP_LOG automatically timestamps messages in the console anyway.
 
 static int32_t get_distance(CustomAccelData live_point, CustomAccelData template_point) {
   return abs(live_point.x - template_point.x) + 
@@ -73,26 +66,45 @@ static int32_t calculate_dtw_cost(uint32_t length) {
 }
 
 static void accel_data_handler(AccelData *data, uint32_t num_samples) {
+  // OPTIMIZATION 1: PRE-FLIGHT MOTION GATE
+  // If the watch isn't moving, don't waste battery doing complex math.
+  bool is_moving = false;
+  for (uint32_t i = 0; i < num_samples; i++) {
+    // Calculate rough magnitude squared (faster than sqrt)
+    int32_t mag_sq = (data[i].x * data[i].x) + (data[i].y * data[i].y) + (data[i].z * data[i].z);
+    
+    // 1G is roughly 1000mG. We allow a threshold (+/- 200mG) for noise
+    if (mag_sq < 640000 || mag_sq > 1440000) { 
+      is_moving = true;
+      break; 
+    }
+  }
+
+  // If no significant movement was detected, drop the batch entirely.
+  if (!is_moving) return;
+
+  // --- Core Processing ---
   for(uint32_t i = 0; i < num_samples; i++) {
     
     if (s_cooldown > 0) {
       s_cooldown--;
       if (s_cooldown == 0) {
-        char time_buf[16]; get_time_string(time_buf, sizeof(time_buf));
-        APP_LOG(APP_LOG_LEVEL_INFO, "%s COOLDOWN ENDED. Listening...", time_buf);
+        APP_LOG(APP_LOG_LEVEL_INFO, "COOLDOWN ENDED. Listening...");
       }
       continue;
     }
 
     if (!s_has_trained_gesture) {
-      if (abs(data[i].x) > 2500 || abs(data[i].y) > 2500 || abs(data[i].z) > 2500) {
-        char time_buf[16]; get_time_string(time_buf, sizeof(time_buf));
-        APP_LOG(APP_LOG_LEVEL_INFO, "%s WRIST FLICK DETECTED! Waking App...", time_buf);
+      // OPTIMIZATION 2: Optimized Default Flick Threshold (Magnitude Squared)
+      int32_t mag_sq = (data[i].x * data[i].x) + (data[i].y * data[i].y) + (data[i].z * data[i].z);
+      if (mag_sq > 6250000) { // Equivalent to > 2500 in any direction
+        APP_LOG(APP_LOG_LEVEL_INFO, "WRIST FLICK DETECTED! Waking App...");
         s_cooldown = 80; 
         worker_launch_app();
         return; 
       }
     } else {
+      // --- CUSTOM GESTURE (DTW) LOGIC ---
       s_buffer.data[s_buffer.index] = data[i];
       s_buffer.index++;
       
@@ -159,8 +171,7 @@ static void accel_data_handler(AccelData *data, uint32_t num_samples) {
         int32_t dynamic_threshold = s_current_buffer_size * 500; 
 
         if (dtw_cost < dynamic_threshold) {
-          char time_buf[16]; get_time_string(time_buf, sizeof(time_buf));
-          APP_LOG(APP_LOG_LEVEL_INFO, "%s GESTURE MATCHED! (Cost: %ld). Launching App...", time_buf, dtw_cost);
+          APP_LOG(APP_LOG_LEVEL_INFO, "GESTURE MATCHED! (Cost: %ld). Launching App...", dtw_cost);
           
           s_cooldown = 80; 
           s_buffer.is_full = false; 
