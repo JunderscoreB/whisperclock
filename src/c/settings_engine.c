@@ -12,13 +12,18 @@ static SimpleMenuLayer *s_simple_menu_layer;
 static SimpleMenuSection s_menu_sections[1];
 static SimpleMenuItem s_menu_items[12];
 
-static char s_volume_text[32];
-static char s_speed_text[32]; 
-static char s_trim_text[32]; 
+// OPTIMIZATION: Reduced memory footprints for text buffers
+static char s_volume_text[16];
+static char s_speed_text[24]; 
+static char s_trim_text[24]; 
 
 static Window *s_about_window;
 static ScrollLayer *s_about_scroll_layer;
 static TextLayer *s_about_text_layer;
+
+// --- Confirm Reset Graphic UI ---
+static Window *s_confirm_window;
+static TextLayer *s_confirm_text_layer;
 
 extern void trigger_playback(bool auto_exit);
 extern void cancel_playback(void);
@@ -50,6 +55,54 @@ void settings_init() {
   }
 }
 
+// ==========================================
+// CONFIRM RESET GESTURE UI
+// ==========================================
+
+static void confirm_select_click_handler(ClickRecognizerRef recognizer, void *context) {
+  if (persist_exists(GESTURE_PERSIST_KEY)) {
+    persist_delete(GESTURE_PERSIST_KEY);
+    vibes_double_pulse();
+    s_menu_items[2].subtitle = "Cleared! (Using Default)"; 
+  } else {
+    s_menu_items[2].subtitle = "Already using default";
+  }
+  layer_mark_dirty(simple_menu_layer_get_layer(s_simple_menu_layer));
+  
+  window_stack_pop(true);
+}
+
+static void confirm_click_config_provider(void *context) {
+  window_single_click_subscribe(BUTTON_ID_SELECT, confirm_select_click_handler);
+}
+
+static void confirm_window_load(Window *window) {
+  Layer *window_layer = window_get_root_layer(window);
+  GRect bounds = layer_get_bounds(window_layer);
+
+  s_confirm_text_layer = text_layer_create(GRect(0, 40, bounds.size.w, 100));
+  text_layer_set_text(s_confirm_text_layer, "Reset custom\ngesture?\n\n[SELECT] to Confirm\n[BACK] to Cancel");
+  text_layer_set_font(s_confirm_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD));
+  text_layer_set_text_alignment(s_confirm_text_layer, GTextAlignmentCenter);
+  
+  layer_add_child(window_layer, text_layer_get_layer(s_confirm_text_layer));
+}
+
+static void confirm_window_unload(Window *window) {
+  text_layer_destroy(s_confirm_text_layer);
+}
+
+void push_reset_confirmation_window() {
+  s_confirm_window = window_create();
+  window_set_window_handlers(s_confirm_window, (WindowHandlers) {
+      .load = confirm_window_load,
+      .unload = confirm_window_unload,
+  });
+  window_set_click_config_provider(s_confirm_window, confirm_click_config_provider);
+  window_stack_push(s_confirm_window, true);
+}
+
+
 // --- Main Menu Callbacks ---
 static void toggle_clock_mode_callback(int index, void *context) {
   s_settings.clock_mode++;
@@ -66,14 +119,7 @@ static void toggle_clock_mode_callback(int index, void *context) {
 static void record_gesture_callback(int index, void *context) { gesture_start_recording(); }
 
 static void clear_gesture_callback(int index, void *context) {
-  if (persist_exists(GESTURE_PERSIST_KEY)) {
-    persist_delete(GESTURE_PERSIST_KEY);
-    vibes_double_pulse();
-    s_menu_items[2].subtitle = "Cleared! (Using Default)"; 
-  } else {
-    s_menu_items[2].subtitle = "Already using default";
-  }
-  layer_mark_dirty(simple_menu_layer_get_layer(s_simple_menu_layer));
+  push_reset_confirmation_window();
 }
 
 static void change_record_time_callback(int index, void *context) {
@@ -142,12 +188,21 @@ static void toggle_quiet_time_callback(int index, void *context) {
 }
 
 // ==========================================
-// SPEAKING GRAPHIC UI (With Giant Time)
+// SPEAKING GRAPHIC UI (With Giant Time & Seconds)
 // ==========================================
 static Window *s_speaking_window = NULL;
 static TextLayer *s_time_text_layer;
 static TextLayer *s_speaking_text_layer;
 static char s_time_buffer[16]; 
+
+// OPTIMIZATION: Store string format pointer to avoid evaluating clock setting every second
+static const char *s_current_time_format;
+
+static void speaking_tick_handler(struct tm *tick_time, TimeUnits units_changed) {
+  // Directly apply the pre-determined format
+  strftime(s_time_buffer, sizeof(s_time_buffer), s_current_time_format, tick_time);
+  text_layer_set_text(s_time_text_layer, s_time_buffer);
+}
 
 static void speaking_click_handler(ClickRecognizerRef recognizer, void *context) {
   cancel_playback();
@@ -174,26 +229,13 @@ static void speaking_window_load(Window *window) {
   light_set_color(GColorBlack);
 #endif
 
-  time_t now = time(NULL);
-  struct tm *t = localtime(&now);
-
-  bool is_military;
-  if (s_settings.clock_mode == 1) is_military = false; 
-  else if (s_settings.clock_mode == 2) is_military = true; 
-  else is_military = clock_is_24h_style(); 
-
-  // Format only the time text
-  if (is_military) strftime(s_time_buffer, sizeof(s_time_buffer), "%H:%M", t);
-  else strftime(s_time_buffer, sizeof(s_time_buffer), "%I:%M", t);
-
-  // The Giant Time Layer
   s_time_text_layer = text_layer_create(GRect(0, bounds.size.h / 2 - 45, bounds.size.w, 50));
-  text_layer_set_text(s_time_text_layer, s_time_buffer);
-  text_layer_set_font(s_time_text_layer, fonts_get_system_font(FONT_KEY_BITHAM_42_BOLD));
+  text_layer_set_background_color(s_time_text_layer, GColorClear);
+  text_layer_set_text_color(s_time_text_layer, GColorBlack);
+  text_layer_set_font(s_time_text_layer, fonts_get_system_font(FONT_KEY_BITHAM_34_MEDIUM_NUMBERS));
   text_layer_set_text_alignment(s_time_text_layer, GTextAlignmentCenter);
   layer_add_child(window_layer, text_layer_get_layer(s_time_text_layer));
 
-  // The "Speaking..." Subtitle Layer
   s_speaking_text_layer = text_layer_create(GRect(0, bounds.size.h / 2 + 5, bounds.size.w, 30));
   text_layer_set_text(s_speaking_text_layer, "Speaking...");
   text_layer_set_font(s_speaking_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD));
@@ -202,12 +244,28 @@ static void speaking_window_load(Window *window) {
 }
 
 static void speaking_window_appear(Window *window) {
+  // Determine time format once per window pop
+  bool is_military;
+  if (s_settings.clock_mode == 1) is_military = false; 
+  else if (s_settings.clock_mode == 2) is_military = true; 
+  else is_military = clock_is_24h_style(); 
+  
+  s_current_time_format = is_military ? "%H:%M:%S" : "%I:%M:%S";
+
+  time_t temp = time(NULL);
+  struct tm *tick_time = localtime(&temp);
+  speaking_tick_handler(tick_time, SECOND_UNIT);
+
+  tick_timer_service_subscribe(SECOND_UNIT, speaking_tick_handler);
+
 #ifdef PBL_TOUCH
   if (touch_service_is_enabled()) touch_service_subscribe(speaking_touch_handler, NULL);
 #endif
 }
 
 static void speaking_window_disappear(Window *window) {
+  tick_timer_service_unsubscribe();
+
 #ifdef PBL_TOUCH
   touch_service_unsubscribe();
 #endif
@@ -255,6 +313,22 @@ static int16_t s_touch_start_y = 0;
 static int16_t s_touch_last_y = 0;
 static bool s_is_drag = false;
 
+// OPTIMIZATION: Helper function eliminates repeated bounds math
+static void apply_clamped_scroll(ScrollLayer *layer, int16_t delta_y) {
+  GPoint offset = scroll_layer_get_content_offset(layer);
+  offset.y += delta_y;
+  
+  int content_h = scroll_layer_get_content_size(layer).h;
+  int layer_h = layer_get_bounds(scroll_layer_get_layer(layer)).size.h;
+  int max_scroll = -(content_h - layer_h);
+  if (max_scroll > 0) max_scroll = 0;
+  
+  if (offset.y > 0) offset.y = 0;
+  if (offset.y < max_scroll) offset.y = max_scroll;
+  
+  scroll_layer_set_content_offset(layer, offset, false);
+}
+
 static void menu_touch_handler(const TouchEvent *event, void *context) {
   if (event->type == TouchEvent_Touchdown) {
     s_touch_start_y = event->y;
@@ -271,18 +345,7 @@ static void menu_touch_handler(const TouchEvent *event, void *context) {
       MenuLayer *menu_layer = simple_menu_layer_get_menu_layer(s_simple_menu_layer);
       ScrollLayer *scroll_layer = menu_layer_get_scroll_layer(menu_layer);
       
-      GPoint offset = scroll_layer_get_content_offset(scroll_layer);
-      offset.y += delta_y;
-      
-      int content_h = scroll_layer_get_content_size(scroll_layer).h;
-      int layer_h = layer_get_bounds(scroll_layer_get_layer(scroll_layer)).size.h;
-      int max_scroll = -(content_h - layer_h);
-      if (max_scroll > 0) max_scroll = 0;
-      
-      if (offset.y > 0) offset.y = 0;
-      if (offset.y < max_scroll) offset.y = max_scroll;
-      
-      scroll_layer_set_content_offset(scroll_layer, offset, false);
+      apply_clamped_scroll(scroll_layer, delta_y);
       s_touch_last_y = event->y;
     }
   } 
@@ -331,18 +394,7 @@ static void about_touch_handler(const TouchEvent *event, void *context) {
 
     if (s_about_is_drag) {
       int16_t delta_y = event->y - s_about_touch_last_y;
-      GPoint offset = scroll_layer_get_content_offset(s_about_scroll_layer);
-      offset.y += delta_y;
-      
-      int content_h = scroll_layer_get_content_size(s_about_scroll_layer).h;
-      int layer_h = layer_get_bounds(scroll_layer_get_layer(s_about_scroll_layer)).size.h;
-      int max_scroll = -(content_h - layer_h);
-      if (max_scroll > 0) max_scroll = 0;
-      
-      if (offset.y > 0) offset.y = 0;
-      if (offset.y < max_scroll) offset.y = max_scroll;
-      
-      scroll_layer_set_content_offset(s_about_scroll_layer, offset, false);
+      apply_clamped_scroll(s_about_scroll_layer, delta_y);
       s_about_touch_last_y = event->y;
     }
   } 
