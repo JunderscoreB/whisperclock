@@ -360,15 +360,17 @@ static void about_window_load(Window *window) {
   s_about_scroll_layer = scroll_layer_create(bounds);
   scroll_layer_set_click_config_onto_window(s_about_scroll_layer, window);
 
-  const char *about_text = "WhisperClock\n\n"
-    "Instructions:\n"
-    "- Flick wrist to hear time (default action)\n"
-    "- Tap or use middle button to change settings\n"
-    "- Use 'Record Gesture' to train a custom motion.\n\n"
-    "Audio Settings:\n"
-    "- Voice Interval: Delay between each spoken word.\n"
-    "- Audio Trim: Cuts dead space from the end of audio clips for faster playback.\n\n"
-    "(Tap anywhere to exit)";
+ const char *about_text = 
+    "WhisperClock\n\n"
+    "Lift the watch to your ear for a private, spoken time check.\n\n"
+    "How to Use:\n"
+    "- Flick wrist to hear the time.\n"
+    "- Tap any button or the screen to instantly stop audio.\n\n"
+    "Key Features:\n"
+    "- Record Gesture: Train a custom arm motion to replace the flick.\n"
+    "- Quiet Time: Automatically mutes during Do Not Disturb.\n"
+    "- Audio Trim: Cuts dead space for punchier playback.\n"
+    "- Voice Interval: Adjusts the reading speed.";
 
   s_about_text_layer = text_layer_create(GRect(0, 10, bounds.size.w, 3000));
   text_layer_set_text(s_about_text_layer, about_text);
