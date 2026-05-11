@@ -1,0 +1,10 @@
+# Pebble Build Files
+/build/
+*.pbw
+/.env/
+/venv/
+*.pyc
+
+# OS generated files
+.DS_Store
+Thumbs.db
