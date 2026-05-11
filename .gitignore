@@ -5,6 +5,8 @@
 /venv/
 /old/
 /resources/*/
+!resources/data/
+/resources/data/*/
 *.pyc
 
 # OS generated files
