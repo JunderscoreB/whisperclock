@@ -31,39 +31,57 @@ static size_t find_wav_data_offset_and_size(const uint8_t *buffer, size_t file_s
     return 44; 
 }
 
+// OPTIMIZATION: Faster lookups by checking first character first
 static uint32_t get_resource_id_for_filename(const char* filename) {
-  if (strcmp(filename, "its.wav") == 0) return RESOURCE_ID_its;
-  if (strcmp(filename, "noon.wav") == 0) return RESOURCE_ID_noon;
-  if (strcmp(filename, "am.wav") == 0) return RESOURCE_ID_am;
-  if (strcmp(filename, "pm.wav") == 0) return RESOURCE_ID_pm;
-  if (strcmp(filename, "oclock.wav") == 0) return RESOURCE_ID_oclock;
-  if (strcmp(filename, "hours.wav") == 0) return RESOURCE_ID_hours;
-  if (strcmp(filename, "hundred.wav") == 0) return RESOURCE_ID_hundred;
-  if (strcmp(filename, "oh.wav") == 0) return RESOURCE_ID_oh;
-  if (strcmp(filename, "zero.wav") == 0 || strcmp(filename, "0.wav") == 0) return RESOURCE_ID_0;
-  if (strcmp(filename, "1.wav") == 0) return RESOURCE_ID_1;
-  if (strcmp(filename, "2.wav") == 0) return RESOURCE_ID_2;
-  if (strcmp(filename, "3.wav") == 0) return RESOURCE_ID_3;
-  if (strcmp(filename, "4.wav") == 0) return RESOURCE_ID_4;
-  if (strcmp(filename, "5.wav") == 0) return RESOURCE_ID_5;
-  if (strcmp(filename, "6.wav") == 0) return RESOURCE_ID_6;
-  if (strcmp(filename, "7.wav") == 0) return RESOURCE_ID_7;
-  if (strcmp(filename, "8.wav") == 0) return RESOURCE_ID_8;
-  if (strcmp(filename, "9.wav") == 0) return RESOURCE_ID_9;
-  if (strcmp(filename, "10.wav") == 0) return RESOURCE_ID_10;
-  if (strcmp(filename, "11.wav") == 0) return RESOURCE_ID_11;
-  if (strcmp(filename, "12.wav") == 0) return RESOURCE_ID_12;
-  if (strcmp(filename, "13.wav") == 0) return RESOURCE_ID_13;
-  if (strcmp(filename, "14.wav") == 0) return RESOURCE_ID_14;
-  if (strcmp(filename, "15.wav") == 0) return RESOURCE_ID_15;
-  if (strcmp(filename, "16.wav") == 0) return RESOURCE_ID_16;
-  if (strcmp(filename, "17.wav") == 0) return RESOURCE_ID_17;
-  if (strcmp(filename, "18.wav") == 0) return RESOURCE_ID_18;
-  if (strcmp(filename, "19.wav") == 0) return RESOURCE_ID_19;
-  if (strcmp(filename, "20.wav") == 0) return RESOURCE_ID_20;
-  if (strcmp(filename, "30.wav") == 0) return RESOURCE_ID_30;
-  if (strcmp(filename, "40.wav") == 0) return RESOURCE_ID_40;
-  if (strcmp(filename, "50.wav") == 0) return RESOURCE_ID_50;
+  char first = filename[0];
+  if (first == 'i' && strcmp(filename, "its.wav") == 0) return RESOURCE_ID_its;
+  if (first == 'n' && strcmp(filename, "noon.wav") == 0) return RESOURCE_ID_noon;
+  if (first == 'a' && strcmp(filename, "am.wav") == 0) return RESOURCE_ID_am;
+  if (first == 'p' && strcmp(filename, "pm.wav") == 0) return RESOURCE_ID_pm;
+  if (first == 'o') {
+      if (strcmp(filename, "oclock.wav") == 0) return RESOURCE_ID_oclock;
+      if (strcmp(filename, "oh.wav") == 0) return RESOURCE_ID_oh;
+  }
+  if (first == 'h') {
+      if (strcmp(filename, "hours.wav") == 0) return RESOURCE_ID_hours;
+      if (strcmp(filename, "hundred.wav") == 0) return RESOURCE_ID_hundred;
+  }
+  if (first == 'z' && strcmp(filename, "zero.wav") == 0) return RESOURCE_ID_0;
+  if (first == '0' && strcmp(filename, "0.wav") == 0) return RESOURCE_ID_0;
+  if (first == '1') {
+      if (strcmp(filename, "1.wav") == 0) return RESOURCE_ID_1;
+      if (strcmp(filename, "10.wav") == 0) return RESOURCE_ID_10;
+      if (strcmp(filename, "11.wav") == 0) return RESOURCE_ID_11;
+      if (strcmp(filename, "12.wav") == 0) return RESOURCE_ID_12;
+      if (strcmp(filename, "13.wav") == 0) return RESOURCE_ID_13;
+      if (strcmp(filename, "14.wav") == 0) return RESOURCE_ID_14;
+      if (strcmp(filename, "15.wav") == 0) return RESOURCE_ID_15;
+      if (strcmp(filename, "16.wav") == 0) return RESOURCE_ID_16;
+      if (strcmp(filename, "17.wav") == 0) return RESOURCE_ID_17;
+      if (strcmp(filename, "18.wav") == 0) return RESOURCE_ID_18;
+      if (strcmp(filename, "19.wav") == 0) return RESOURCE_ID_19;
+  }
+  if (first == '2') {
+      if (strcmp(filename, "2.wav") == 0) return RESOURCE_ID_2;
+      if (strcmp(filename, "20.wav") == 0) return RESOURCE_ID_20;
+  }
+  if (first == '3') {
+      if (strcmp(filename, "3.wav") == 0) return RESOURCE_ID_3;
+      if (strcmp(filename, "30.wav") == 0) return RESOURCE_ID_30;
+  }
+  if (first == '4') {
+      if (strcmp(filename, "4.wav") == 0) return RESOURCE_ID_4;
+      if (strcmp(filename, "40.wav") == 0) return RESOURCE_ID_40;
+  }
+  if (first == '5') {
+      if (strcmp(filename, "5.wav") == 0) return RESOURCE_ID_5;
+      if (strcmp(filename, "50.wav") == 0) return RESOURCE_ID_50;
+  }
+  if (first == '6' && strcmp(filename, "6.wav") == 0) return RESOURCE_ID_6;
+  if (first == '7' && strcmp(filename, "7.wav") == 0) return RESOURCE_ID_7;
+  if (first == '8' && strcmp(filename, "8.wav") == 0) return RESOURCE_ID_8;
+  if (first == '9' && strcmp(filename, "9.wav") == 0) return RESOURCE_ID_9;
+
   return 0; 
 }
 
@@ -74,12 +92,18 @@ static size_t s_stream_offset = 0;
 static AppTimer *s_chunk_timer = NULL;
 static bool s_amp_primed = false;
 
-// NEW: Instantly halts all audio processing
 void speaker_cancel(void) {
   if (s_chunk_timer) {
     app_timer_cancel(s_chunk_timer);
     s_chunk_timer = NULL;
   }
+  
+  // OPTIMIZATION: Ensure memory is freed if canceled mid-playback
+  if (s_audio_buffer != NULL) {
+      free(s_audio_buffer);
+      s_audio_buffer = NULL;
+  }
+
   if (s_is_stream_open) {
     speaker_stop();
     speaker_stream_close();
@@ -89,6 +113,7 @@ void speaker_cancel(void) {
 
 static void push_audio_chunk(void *data) {
     if (!s_is_stream_open || s_audio_buffer == NULL) return;
+    
     bool hardware_buffer_full = false;
     while (s_stream_offset < s_current_res_size && !hardware_buffer_full) {
         size_t remaining = s_current_res_size - s_stream_offset;
@@ -97,10 +122,17 @@ static void push_audio_chunk(void *data) {
         s_stream_offset += bytes_written;
         if (bytes_written < chunk) hardware_buffer_full = true;
     }
+    
     if (s_stream_offset < s_current_res_size) {
         s_chunk_timer = app_timer_register(CHUNK_DELAY_MS, push_audio_chunk, NULL);
     } else {
         s_chunk_timer = NULL; 
+        
+        // OPTIMIZATION: Critical memory cleanup immediately after the last byte is queued
+        if (s_audio_buffer != NULL) {
+            free(s_audio_buffer);
+            s_audio_buffer = NULL;
+        }
     }
 }
 
@@ -109,17 +141,11 @@ uint32_t speaker_play_file(const char* filename) {
   if (res_id != 0) {
     APP_LOG(APP_LOG_LEVEL_INFO, "PLAYING: %s", filename);
     
-    // Ensure any previously playing sound is stopped safely
     speaker_cancel();
 
     ResHandle res_handle = resource_get_handle(res_id);
     if (!res_handle) return 0;
     size_t res_size = resource_size(res_handle);
-
-    if (s_audio_buffer != NULL) {
-        free(s_audio_buffer);
-        s_audio_buffer = NULL;
-    }
 
     s_audio_buffer = (uint8_t *)malloc(res_size);
     if (s_audio_buffer == NULL) return 0;
@@ -138,10 +164,12 @@ uint32_t speaker_play_file(const char* filename) {
 
     s_current_res_size = s_stream_offset + actual_data_length;
 
+    // OPTIMIZATION: Single pass to remove DC offset. 
     for (size_t i = s_stream_offset; i < s_current_res_size; i++) {
         s_audio_buffer[i] -= 128;
     }
 
+    // Fades
     size_t fade_samples = 64;
     if (actual_data_length > fade_samples * 2) {
         for (size_t i = 0; i < fade_samples; i++) {
