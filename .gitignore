@@ -3,8 +3,11 @@
 *.pbw
 /.env/
 /venv/
+/old/
+/resources/*/
 *.pyc
 
 # OS generated files
 .DS_Store
 Thumbs.db
+deploy.sh
