@@ -12,7 +12,6 @@ static SimpleMenuLayer *s_simple_menu_layer;
 static SimpleMenuSection s_menu_sections[1];
 static SimpleMenuItem s_menu_items[12];
 
-// OPTIMIZATION: Reduced memory footprints for text buffers
 static char s_volume_text[16];
 static char s_speed_text[24]; 
 static char s_trim_text[24]; 
@@ -21,7 +20,6 @@ static Window *s_about_window;
 static ScrollLayer *s_about_scroll_layer;
 static TextLayer *s_about_text_layer;
 
-// --- Confirm Reset Graphic UI ---
 static Window *s_confirm_window;
 static TextLayer *s_confirm_text_layer;
 
@@ -34,7 +32,7 @@ static void save_settings() {
 
 void settings_init() {
   s_settings.say_its = true;
-  s_settings.playback_speed = 50; // NEW DEFAULT: 50 ms
+  s_settings.playback_speed = 50; 
   s_settings.gesture_buffer_size = 25; 
   s_settings.clock_mode = 0; 
   s_settings.say_ampm = true; 
@@ -45,7 +43,6 @@ void settings_init() {
   if (persist_exists(SETTINGS_PERSIST_KEY)) {
     persist_read_data(SETTINGS_PERSIST_KEY, &s_settings, sizeof(WhisperSettings));
     
-    // NEW BOUNDS: 50 ms to 500 ms
     if (s_settings.volume < 10 || s_settings.volume > 100) s_settings.volume = 60;
     if (s_settings.playback_speed < 50 || s_settings.playback_speed > 500) s_settings.playback_speed = 50;
     if (s_settings.clip_trim < 0 || s_settings.clip_trim > 450) s_settings.clip_trim = 0; 
@@ -55,17 +52,13 @@ void settings_init() {
   }
 }
 
-// ==========================================
-// CONFIRM RESET GESTURE UI
-// ==========================================
-
 static void confirm_select_click_handler(ClickRecognizerRef recognizer, void *context) {
   if (persist_exists(GESTURE_PERSIST_KEY)) {
     persist_delete(GESTURE_PERSIST_KEY);
     vibes_double_pulse();
-    s_menu_items[2].subtitle = "Cleared! (Using Default)"; 
+    s_menu_items[3].subtitle = "Cleared! (Using Default)"; 
   } else {
-    s_menu_items[2].subtitle = "Already using default";
+    s_menu_items[3].subtitle = "Already using default";
   }
   layer_mark_dirty(simple_menu_layer_get_layer(s_simple_menu_layer));
   
@@ -102,8 +95,6 @@ void push_reset_confirmation_window() {
   window_stack_push(s_confirm_window, true);
 }
 
-
-// --- Main Menu Callbacks ---
 static void toggle_clock_mode_callback(int index, void *context) {
   s_settings.clock_mode++;
   if (s_settings.clock_mode > 2) s_settings.clock_mode = 0;
@@ -116,6 +107,13 @@ static void toggle_clock_mode_callback(int index, void *context) {
   save_settings();
 }
 
+static void toggle_quiet_time_callback(int index, void *context) {
+  s_settings.respect_quiet_time = !s_settings.respect_quiet_time;
+  s_menu_items[1].subtitle = s_settings.respect_quiet_time ? "Mute during DND" : "Always Speak"; 
+  layer_mark_dirty(simple_menu_layer_get_layer(s_simple_menu_layer));
+  save_settings();
+}
+
 static void record_gesture_callback(int index, void *context) { gesture_start_recording(); }
 
 static void clear_gesture_callback(int index, void *context) {
@@ -124,13 +122,13 @@ static void clear_gesture_callback(int index, void *context) {
 
 static void change_record_time_callback(int index, void *context) {
   if (s_settings.gesture_buffer_size == 25) {
-    s_settings.gesture_buffer_size = 30; s_menu_items[3].subtitle = "3.0 Seconds"; 
+    s_settings.gesture_buffer_size = 30; s_menu_items[4].subtitle = "3.0 Seconds"; 
   } else if (s_settings.gesture_buffer_size == 30) {
-    s_settings.gesture_buffer_size = 40; s_menu_items[3].subtitle = "4.0 Seconds";
+    s_settings.gesture_buffer_size = 40; s_menu_items[4].subtitle = "4.0 Seconds";
   } else if (s_settings.gesture_buffer_size == 40) {
-    s_settings.gesture_buffer_size = 20; s_menu_items[3].subtitle = "2.0 Seconds";
+    s_settings.gesture_buffer_size = 20; s_menu_items[4].subtitle = "2.0 Seconds";
   } else {
-    s_settings.gesture_buffer_size = 25; s_menu_items[3].subtitle = "2.5 Seconds (Default)";
+    s_settings.gesture_buffer_size = 25; s_menu_items[4].subtitle = "2.5 Seconds (Default)";
   }
   layer_mark_dirty(simple_menu_layer_get_layer(s_simple_menu_layer));
   save_settings();
@@ -138,14 +136,14 @@ static void change_record_time_callback(int index, void *context) {
 
 static void toggle_its_callback(int index, void *context) {
   s_settings.say_its = !s_settings.say_its;
-  s_menu_items[4].subtitle = s_settings.say_its ? "Enabled" : "Disabled"; 
+  s_menu_items[5].subtitle = s_settings.say_its ? "Enabled" : "Disabled"; 
   layer_mark_dirty(simple_menu_layer_get_layer(s_simple_menu_layer));
   save_settings();
 }
 
 static void toggle_ampm_callback(int index, void *context) {
   s_settings.say_ampm = !s_settings.say_ampm;
-  s_menu_items[5].subtitle = s_settings.say_ampm ? "Enabled" : "Disabled"; 
+  s_menu_items[6].subtitle = s_settings.say_ampm ? "Enabled" : "Disabled"; 
   layer_mark_dirty(simple_menu_layer_get_layer(s_simple_menu_layer));
   save_settings();
 }
@@ -155,7 +153,7 @@ static void change_volume_callback(int index, void *context) {
   if (s_settings.volume > 100) s_settings.volume = 10;
   
   snprintf(s_volume_text, sizeof(s_volume_text), "Level: %d%%", s_settings.volume);
-  s_menu_items[6].subtitle = s_volume_text;
+  s_menu_items[7].subtitle = s_volume_text;
   layer_mark_dirty(simple_menu_layer_get_layer(s_simple_menu_layer));
   save_settings();
 }
@@ -165,7 +163,7 @@ static void change_speed_callback(int index, void *context) {
   if (s_settings.playback_speed > 500) s_settings.playback_speed = 50;
   
   snprintf(s_speed_text, sizeof(s_speed_text), "Interval: %d ms", s_settings.playback_speed);
-  s_menu_items[7].subtitle = s_speed_text;
+  s_menu_items[8].subtitle = s_speed_text;
   layer_mark_dirty(simple_menu_layer_get_layer(s_simple_menu_layer));
   save_settings();
 }
@@ -175,31 +173,19 @@ static void change_trim_callback(int index, void *context) {
   if (s_settings.clip_trim > 450) s_settings.clip_trim = 0; 
   
   snprintf(s_trim_text, sizeof(s_trim_text), "Trim End: %d ms", s_settings.clip_trim);
-  s_menu_items[8].subtitle = s_trim_text;
+  s_menu_items[9].subtitle = s_trim_text;
   layer_mark_dirty(simple_menu_layer_get_layer(s_simple_menu_layer));
   save_settings();
 }
 
-static void toggle_quiet_time_callback(int index, void *context) {
-  s_settings.respect_quiet_time = !s_settings.respect_quiet_time;
-  s_menu_items[9].subtitle = s_settings.respect_quiet_time ? "Mute during DND" : "Always Speak"; 
-  layer_mark_dirty(simple_menu_layer_get_layer(s_simple_menu_layer));
-  save_settings();
-}
 
-// ==========================================
-// SPEAKING GRAPHIC UI (With Giant Time & Seconds)
-// ==========================================
 static Window *s_speaking_window = NULL;
 static TextLayer *s_time_text_layer;
 static TextLayer *s_speaking_text_layer;
 static char s_time_buffer[16]; 
-
-// OPTIMIZATION: Store string format pointer to avoid evaluating clock setting every second
 static const char *s_current_time_format;
 
 static void speaking_tick_handler(struct tm *tick_time, TimeUnits units_changed) {
-  // Directly apply the pre-determined format
   strftime(s_time_buffer, sizeof(s_time_buffer), s_current_time_format, tick_time);
   text_layer_set_text(s_time_text_layer, s_time_buffer);
 }
@@ -244,7 +230,6 @@ static void speaking_window_load(Window *window) {
 }
 
 static void speaking_window_appear(Window *window) {
-  // Determine time format once per window pop
   bool is_military;
   if (s_settings.clock_mode == 1) is_military = false; 
   else if (s_settings.clock_mode == 2) is_military = true; 
@@ -304,16 +289,11 @@ static void test_audio_callback(int index, void *context) {
   trigger_playback(false); 
 }
 
-// ==========================================
-// TOUCHSCREEN TRANSLATOR LOGIC 
-// ==========================================
-
 #ifdef PBL_TOUCH
 static int16_t s_touch_start_y = 0;
 static int16_t s_touch_last_y = 0;
 static bool s_is_drag = false;
 
-// OPTIMIZATION: Helper function eliminates repeated bounds math
 static void apply_clamped_scroll(ScrollLayer *layer, int16_t delta_y) {
   GPoint offset = scroll_layer_get_content_offset(layer);
   offset.y += delta_y;
@@ -404,7 +384,6 @@ static void about_touch_handler(const TouchEvent *event, void *context) {
 }
 #endif
 
-// --- About Menu Window ---
 static void about_window_load(Window *window) {
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
@@ -466,7 +445,6 @@ static void show_about_callback(int index, void *context) {
   window_stack_push(s_about_window, true);
 }
 
-// --- Main Menu Window ---
 static void menu_window_load(Window *window) {
   app_worker_kill();
 
@@ -474,33 +452,35 @@ static void menu_window_load(Window *window) {
   if (s_settings.clock_mode == 1) clock_text = "Force 12-Hour";
   if (s_settings.clock_mode == 2) clock_text = "Force 24-Hour";
 
-  s_menu_items[0] = (SimpleMenuItem) { .title = "Clock Mode", .subtitle = clock_text, .callback = toggle_clock_mode_callback };
-  s_menu_items[1] = (SimpleMenuItem) { .title = "Record Gesture", .subtitle = "Train your watch", .callback = record_gesture_callback };
-  s_menu_items[2] = (SimpleMenuItem) { .title = "Clear Gesture", .subtitle = "Revert to default flick", .callback = clear_gesture_callback };
-  
   char *time_text = "2.5 Seconds (Default)";
   if (s_settings.gesture_buffer_size == 20) time_text = "2.0 Seconds";
   if (s_settings.gesture_buffer_size == 30) time_text = "3.0 Seconds";
   if (s_settings.gesture_buffer_size == 40) time_text = "4.0 Seconds";
 
-  s_menu_items[3] = (SimpleMenuItem) { .title = "Recording Time", .subtitle = time_text, .callback = change_record_time_callback };
-  s_menu_items[4] = (SimpleMenuItem) { .title = "Prefix: \"It's\"", .subtitle = s_settings.say_its ? "Enabled" : "Disabled", .callback = toggle_its_callback };
-  s_menu_items[5] = (SimpleMenuItem) { .title = "Speak AM/PM", .subtitle = s_settings.say_ampm ? "Enabled" : "Disabled", .callback = toggle_ampm_callback };
-  
   snprintf(s_volume_text, sizeof(s_volume_text), "Level: %d%%", s_settings.volume);
-  s_menu_items[6] = (SimpleMenuItem) { .title = "Speaker Volume", .subtitle = s_volume_text, .callback = change_volume_callback };
-
   snprintf(s_speed_text, sizeof(s_speed_text), "Interval: %d ms", s_settings.playback_speed);
-  s_menu_items[7] = (SimpleMenuItem) { .title = "Voice Interval", .subtitle = s_speed_text, .callback = change_speed_callback };
-
   snprintf(s_trim_text, sizeof(s_trim_text), "Trim End: %d ms", s_settings.clip_trim);
-  s_menu_items[8] = (SimpleMenuItem) { .title = "Audio Trim", .subtitle = s_trim_text, .callback = change_trim_callback };
 
-  s_menu_items[9] = (SimpleMenuItem) { .title = "Quiet Time", .subtitle = s_settings.respect_quiet_time ? "Mute during DND" : "Always Speak", .callback = toggle_quiet_time_callback };
+  // REORDERED MENU
+  s_menu_items[0] = (SimpleMenuItem) { .title = "Clock Mode", .subtitle = clock_text, .callback = toggle_clock_mode_callback };
+  s_menu_items[1] = (SimpleMenuItem) { .title = "Quiet Time", .subtitle = s_settings.respect_quiet_time ? "Mute during DND" : "Always Speak", .callback = toggle_quiet_time_callback };
+  s_menu_items[2] = (SimpleMenuItem) { .title = "Record Gesture", .subtitle = "Train your watch", .callback = record_gesture_callback };
+  s_menu_items[3] = (SimpleMenuItem) { .title = "Clear Gesture", .subtitle = "Revert to default flick", .callback = clear_gesture_callback };
+  s_menu_items[4] = (SimpleMenuItem) { .title = "Recording Time", .subtitle = time_text, .callback = change_record_time_callback };
+  s_menu_items[5] = (SimpleMenuItem) { .title = "Prefix: \"It's\"", .subtitle = s_settings.say_its ? "Enabled" : "Disabled", .callback = toggle_its_callback };
+  s_menu_items[6] = (SimpleMenuItem) { .title = "Speak AM/PM", .subtitle = s_settings.say_ampm ? "Enabled" : "Disabled", .callback = toggle_ampm_callback };
+  s_menu_items[7] = (SimpleMenuItem) { .title = "Speaker Volume", .subtitle = s_volume_text, .callback = change_volume_callback };
+  s_menu_items[8] = (SimpleMenuItem) { .title = "Voice Interval", .subtitle = s_speed_text, .callback = change_speed_callback };
+  s_menu_items[9] = (SimpleMenuItem) { .title = "Audio Trim", .subtitle = s_trim_text, .callback = change_trim_callback };
   s_menu_items[10] = (SimpleMenuItem) { .title = "Test Audio", .subtitle = "Preview time speaking", .callback = test_audio_callback };
   s_menu_items[11] = (SimpleMenuItem) { .title = "About / Help", .subtitle = "Instructions & Info", .callback = show_about_callback };
 
-  s_menu_sections[0] = (SimpleMenuSection) { .num_items = 12, .items = s_menu_items };
+  // ADDED HEADER TITLE
+  s_menu_sections[0] = (SimpleMenuSection) {
+    .title = "WhisperClock Settings",
+    .num_items = 12,
+    .items = s_menu_items
+  };
 
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
