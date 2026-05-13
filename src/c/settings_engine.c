@@ -393,15 +393,15 @@ static void about_window_load(Window *window) {
 
  const char *about_text = 
     "WhisperClock\n\n"
-    "Lift the watch to your ear for a private, spoken time check.\n\n"
+    "A private, spoken time check for your wrist.\n\n"
     "How to Use:\n"
-    "- Flick wrist to hear the time.\n"
-    "- Tap any button or the screen to instantly stop audio.\n\n"
+    "- Flick wrist or knock or tap the glass to hear the time.\n"
+    "- Press any button or tap screen to instantly stop audio.\n\n"
     "Key Features:\n"
-    "- Record Gesture: Train a custom arm motion to replace the flick.\n"
-    "- Quiet Time: Automatically mutes during Do Not Disturb.\n"
-    "- Audio Trim: Cuts dead space for punchier playback.\n"
-    "- Voice Interval: Adjusts the reading speed.";
+    "- Trigger Method: Choose wrist sweeps, glass tapping, or both.\n"
+    "- Knock Count: Set how many taps wake the app (2-5).\n"
+    "- Record Gesture: Train a custom arm motion.\n"
+    "- Quiet Time: Mutes during Do Not Disturb.";
 
   s_about_text_layer = text_layer_create(GRect(0, 10, bounds.size.w, 3000));
   text_layer_set_text(s_about_text_layer, about_text);
