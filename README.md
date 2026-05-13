@@ -1,43 +1,30 @@
-# WhisperClock for PebbleOS
+# ⌚ WhisperClock for Pebble
 
-**WhisperClock** is a highly customizable, natural-sounding speaking clock app for PebbleOS-based smartwatches that have speakers (currently supported: Pebble Time 2). 
+WhisperClock is a highly customizable, stealthy time-telling app for Pebble smartwatches. It allows you to check the time privately by holding the watch to your ear and triggering a spoken audio announcement using either a wrist flick or by physically tapping the glass.
 
-## 🎯 Purpose
-Traditionally, wristwatches require visual attention to tell the time, but a smartwatch with a speaker allows the time to be spoken. This is especially useful for people who cannot use their eyes to check the watch, including those who are visually impaired, not wearing their glasses, unable to take their eyes off a task (e.g., driving), or wanting to check the time in a dark place without using a harsh backlight (e.g., sleeping, stargazing). The intention is for the wearer to lift the watch up to their ear to hear the time spoken to them, allowing for a quiet, discreet, and private time check.
+Designed with battery life and memory efficiency in mind, WhisperClock runs a deeply optimized background worker that listens for your specific triggers while letting the main CPU sleep.
 
-## ✨ Features
+## ✨ Key Features
 
-* **Motion Activated:** Hear the time simply by flicking your wrist using Pebble's native accelerometer.
-* **Custom Gesture Training:** Don't like the standard wrist flick? Record and train your own custom arm movement to trigger the clock using dynamic time-warping.
-* **Intelligent Audio Stitching:** Dynamically handles 12-hour and 24-hour (military) time formats seamlessly. Can be set independently from your system watch settings.
-* **Pebble Quiet Time Integration:** Automatically mutes itself when your watch is in Do Not Disturb mode—preventing accidental interruptions during meetings or sleep. Can be overridden in settings. 
-* **Quick Kill Switch:** Tap any button or the screen to instantly cancel audio playback.
-* **Deep Audio Customization:**
-  * **Voice Interval:** Adjust the millisecond delay (50ms - 500ms) between stitched words for faster or slower reading speeds.
-  * **Audio Trim:** Automatically trim dead space from the end of audio clips for punchier, faster playback.
-  * **Volume Control:** Independent speaker volume levels (10% - 100%).
-  * **Prefix/Suffix Toggles:** Choose whether the watch says "It's..." and "AM/PM".
-* **UI Displays the Time:** Shows a high-contrast digital time readout while speaking; the backlight remains off to preserve night vision and battery.  
+* **✊ Hardware Tap Detection:** Wake the app by knocking on the watch glass. Set your required "Knock Count" (2 to 5 taps) to prevent accidental triggers.
+* **🦾 Custom DTW Gestures:** Don't like the default wrist flick? Record a custom arm motion (like raising your arm to your ear). WhisperClock uses Dynamic Time Warping (DTW) to match your movement in the background.
+* **🔋 Battery Optimized:** The background worker uses a "Motion Gate" to instantly drop accelerometer data when the watch is still, ensuring the complex gesture math only runs when you are actually moving.
+* **🤫 Quiet Time Aware:** Automatically mutes the spoken audio if your Pebble is in Do Not Disturb mode, but can be overridden.
+* **⚙️ Advanced Playback Controls:** Tweak the speaker volume, adjust the interval speed between spoken words, and trim the end of the audio clips for punchier playback.
 
-## 🛠️ Build Requirements
+## 🛠️ How to Use
 
-* Pebble SDK (v4.3 or newer)
-* Exported 8-bit, 16kHz Mono WAV files for the audio engine (placed in the resources folder)
-* Audacity (or similar) for batch-processing audio clips
+1. **Trigger the App:** Depending on your settings, either perform your wrist sweep gesture or tap the glass (default is 3 taps).
+2. **Listen:** Hold the watch to your ear to hear the time.
+3. **Cancel:** Press **any** physical button on the watch or tap the screen to instantly kill the audio and close the app.
 
-## 🚀 How to Build and Install
+## 🎛️ Settings Menu
 
-1. Clone this repository to your local machine.
-2. Place your processed `.wav` audio files into the `resources/audio/` directory.
-3. Update `appinfo.json` to include your new audio resources.
-4. Run `pebble build` in your terminal.
-5. Install the generated `.pbw` file onto your Pebble via the Pebble app or `pebble install --emulator`.
-
-## 🗺️ Future Plans
-
-* Localization for regional English dialects
-* Support for additional languages
-* Compatibility with future PebbleOS watches featuring speakers
-* General performance tweaks and quality-of-life improvements
-
-We are happy to hear about other suggested tweaks or features from users. Language-pack contributions are welcome!
+Launch WhisperClock from your Pebble's main menu to configure:
+* **Clock Mode:** Auto (matches system), Force 12-Hour, or Force 24-Hour.
+* **Quiet Time:** Choose whether to respect DND or always speak.
+* **Trigger Method:** Choose between "Gesture Sweep", "Glass Tapping", or Both.
+* **Knock Count:** How many physical glass taps are required to wake the app.
+* **Record/Clear Gesture:** Train a custom accelerometer pattern or revert to the default flick.
+* **Prefix & AM/PM:** Toggle conversational words like "It's" and "AM/PM".
+* **Audio Tweaks:** Fine-tune Volume, Voice Interval, and Audio Trim.
