@@ -14,6 +14,7 @@ Designed with battery life and memory efficiency in mind, WhisperClock runs a de
 
 ## 🛠️ How to Use
 
+### General Operation
 1. **Trigger the App:** Depending on your settings, either perform your wrist sweep gesture or tap the glass (default is 3 taps).
 2. **Listen:** Hold the watch to your ear to hear the time.
 3. **Cancel:** Press **any** physical button on the watch or tap the screen to instantly kill the audio and close the app.
