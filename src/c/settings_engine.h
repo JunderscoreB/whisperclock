@@ -10,6 +10,8 @@ typedef struct {
   uint8_t volume;
   int16_t clip_trim;
   bool respect_quiet_time;
+  uint8_t trigger_mode; // NEW: 0 = Gesture, 1 = Tap, 2 = Both
+  uint8_t tap_count;    // NEW: Number of taps required (e.g., 2, 3, 4)
 } WhisperSettings;
 
 void settings_init(void);

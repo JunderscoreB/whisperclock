@@ -6,13 +6,21 @@
 
 #define MIN3(a, b, c) ((a) < (b) ? ((a) < (c) ? (a) : (c)) : ((b) < (c) ? (b) : (c)))
 
+// ALIGNMENT FIX: This must precisely match settings_engine.h!
 typedef struct {
   bool say_its;
-  int playback_speed; 
-  int gesture_buffer_size; 
-  int clock_mode; // 0 = Auto, 1 = 12h, 2 = 24h
-  bool say_ampm;  // NEW: Toggle for AM/PM
+  bool say_ampm;
+  int16_t playback_speed;
+  int16_t gesture_buffer_size;
+  uint8_t clock_mode;
+  uint8_t volume;
+  int16_t clip_trim;
+  bool respect_quiet_time;
+  uint8_t trigger_mode; 
+  uint8_t tap_count;    
 } WhisperSettings;
+
+WhisperSettings s_worker_settings; 
 
 typedef struct {
   int16_t x; int16_t y; int16_t z;
@@ -37,8 +45,9 @@ static AccelData s_flat_live_data[MAX_BUFFER_SIZE];
 static CustomAccelData s_centered_live[MAX_BUFFER_SIZE];
 static CustomAccelData s_centered_saved[MAX_BUFFER_SIZE];
 
-// Removed get_time_string() as string formatting in the background is expensive
-// and APP_LOG automatically timestamps messages in the console anyway.
+// Tap State
+static int s_current_taps = 0;
+static uint32_t s_last_tap_time = 0;
 
 static int32_t get_distance(CustomAccelData live_point, CustomAccelData template_point) {
   return abs(live_point.x - template_point.x) + 
@@ -65,22 +74,50 @@ static int32_t calculate_dtw_cost(uint32_t length) {
   return s_prev_row[length - 1]; 
 }
 
+// --- HARDWARE TAP DETECTOR ---
+static void accel_tap_handler(AccelAxisType axis, int32_t direction) {
+  // If set to Gesture Only, completely ignore
+  if (s_worker_settings.trigger_mode == 0) return;
+
+  // Glass knocks register heavily on the Z axis
+  if (axis == ACCEL_AXIS_Z) {
+//  if(true) {	
+    uint32_t now = time(NULL);
+
+    // If it's been more than 2 seconds since the last knock, restart the count
+    if (now - s_last_tap_time > 2) {
+      s_current_taps = 1;
+    } else {
+      s_current_taps++;
+    }
+
+    s_last_tap_time = now;
+
+    // Has the sequence been completed?
+    if (s_current_taps >= s_worker_settings.tap_count) {
+      APP_LOG(APP_LOG_LEVEL_INFO, "GLASS TAP SEQUENCE DETECTED! Waking App...");
+      s_current_taps = 0; 
+      s_cooldown = 80; 
+      worker_launch_app();
+    }
+  }
+}
+
+
 static void accel_data_handler(AccelData *data, uint32_t num_samples) {
-  // OPTIMIZATION 1: PRE-FLIGHT MOTION GATE
-  // If the watch isn't moving, don't waste battery doing complex math.
+  // If the user set it to TAP ONLY, completely ignore the sweep data!
+  if (s_worker_settings.trigger_mode == 1) return;
+
+  // MOTION GATE
   bool is_moving = false;
   for (uint32_t i = 0; i < num_samples; i++) {
-    // Calculate rough magnitude squared (faster than sqrt)
     int32_t mag_sq = (data[i].x * data[i].x) + (data[i].y * data[i].y) + (data[i].z * data[i].z);
-    
-    // 1G is roughly 1000mG. We allow a threshold (+/- 200mG) for noise
     if (mag_sq < 640000 || mag_sq > 1440000) { 
       is_moving = true;
       break; 
     }
   }
 
-  // If no significant movement was detected, drop the batch entirely.
   if (!is_moving) return;
 
   // --- Core Processing ---
@@ -88,23 +125,18 @@ static void accel_data_handler(AccelData *data, uint32_t num_samples) {
     
     if (s_cooldown > 0) {
       s_cooldown--;
-      if (s_cooldown == 0) {
-        APP_LOG(APP_LOG_LEVEL_INFO, "COOLDOWN ENDED. Listening...");
-      }
       continue;
     }
 
     if (!s_has_trained_gesture) {
-      // OPTIMIZATION 2: Optimized Default Flick Threshold (Magnitude Squared)
       int32_t mag_sq = (data[i].x * data[i].x) + (data[i].y * data[i].y) + (data[i].z * data[i].z);
-      if (mag_sq > 6250000) { // Equivalent to > 2500 in any direction
+      if (mag_sq > 6250000) { 
         APP_LOG(APP_LOG_LEVEL_INFO, "WRIST FLICK DETECTED! Waking App...");
         s_cooldown = 80; 
         worker_launch_app();
         return; 
       }
     } else {
-      // --- CUSTOM GESTURE (DTW) LOGIC ---
       s_buffer.data[s_buffer.index] = data[i];
       s_buffer.index++;
       
@@ -188,29 +220,34 @@ static void worker_init() {
   s_cooldown = 0;
   s_buffer.index = 0;
   s_buffer.is_full = false;
+  
+  // Set safety defaults
   s_current_buffer_size = 25; 
+  s_worker_settings.trigger_mode = 0;
+  s_worker_settings.tap_count = 3;
 
   if (persist_exists(SETTINGS_PERSIST_KEY)) {
-    WhisperSettings settings;
-    persist_read_data(SETTINGS_PERSIST_KEY, &settings, sizeof(WhisperSettings));
-    s_current_buffer_size = settings.gesture_buffer_size;
+    persist_read_data(SETTINGS_PERSIST_KEY, &s_worker_settings, sizeof(WhisperSettings));
+    s_current_buffer_size = s_worker_settings.gesture_buffer_size;
   }
   
   if (persist_exists(GESTURE_PERSIST_KEY)) {
     persist_read_data(GESTURE_PERSIST_KEY, s_gesture_template, sizeof(s_gesture_template));
     s_has_trained_gesture = true;
-    APP_LOG(APP_LOG_LEVEL_INFO, "Worker: TRAINED DTW MODE (%d samples)", s_current_buffer_size);
   } else {
     s_has_trained_gesture = false;
-    APP_LOG(APP_LOG_LEVEL_INFO, "Worker: DEFAULT FLICK MODE (2.5G Threshold)");
   }
 
+  // Subscribe to BOTH hardware services!
   accel_data_service_subscribe(1, accel_data_handler);
   accel_service_set_sampling_rate(ACCEL_SAMPLING_10HZ);
+  
+  accel_tap_service_subscribe(accel_tap_handler);
 }
 
 static void worker_deinit() {
   accel_data_service_unsubscribe();
+  accel_tap_service_unsubscribe();
 }
 
 int main(void) {
