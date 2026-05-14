@@ -419,7 +419,7 @@ static void about_touch_handler(const TouchEvent *event, void *context) {
     scroll_layer_set_click_config_onto_window(s_about_scroll_layer, window);
 
     const char *about_text =
-"WhisperClock\n\n"
+"WhisperClock v0.9 (Beta)\n\n"
     "A private, spoken time check for your wrist.\n\n"
     "How to Use:\n"
     "- Flick wrist or knock the glass to hear the time.\n"
