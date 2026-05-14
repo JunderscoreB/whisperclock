@@ -419,7 +419,7 @@ static void about_touch_handler(const TouchEvent *event, void *context) {
     scroll_layer_set_click_config_onto_window(s_about_scroll_layer, window);
 
     const char *about_text =
-    "WhisperClock\n\n"
+"WhisperClock\n\n"
     "A private, spoken time check for your wrist.\n\n"
     "How to Use:\n"
     "- Flick wrist or knock the glass to hear the time.\n"
@@ -428,7 +428,9 @@ static void about_touch_handler(const TouchEvent *event, void *context) {
     "- Trigger Method: Choose wrist sweeps, glass tapping, or both.\n"
     "- Knock Count: Set how many taps wake the app (2-5).\n"
     "- Record Gesture: Train a custom arm motion.\n"
-    "- Quiet Time: Mutes during Do Not Disturb.";
+    "- Quiet Time: Mutes during Do Not Disturb.\n\n"
+    "Created by J_B\n"
+    "Released under MIT License";
 
     s_about_text_layer = text_layer_create(GRect(0, 10, bounds.size.w, 4000));
     text_layer_set_text(s_about_text_layer, about_text);
