@@ -1,13 +1,8 @@
 /*
- * WhisperClock
+ * WhisperClock - Audio Engine Implementation
  * Copyright (c) 2026 J_B
  *
  * Released under the MIT License.
- *
- * AI Disclosure: Portions of this file, including system architecture, 
- * audio upsampling algorithms, and preprocessor UI toggles, were 
- * generated and optimized with the assistance of generative AI 
- * (Google Gemini).
  */
 
 #include <pebble.h>
@@ -44,6 +39,9 @@ static void queue_number(int number) {
     queue_audio(file_buf, buf);
 }
 
+/**
+ * @brief Constructs the sequence of words to speak based on current time.
+ */
 void generate_audio_playlist() {
   s_playlist_size = 0;
 
@@ -119,6 +117,9 @@ static void hide_graphic_callback(void *data) {
   hide_speaking_graphic();
 }
 
+/**
+ * @brief State Machine handler for traversing the generated audio playlist.
+ */
 static void play_next_word(void *data) {
   s_queue_timer = NULL; 
 
@@ -136,9 +137,9 @@ static void play_next_word(void *data) {
     uint32_t time_to_wait = clip_duration_ms + s_settings.playback_speed;
     s_queue_timer = app_timer_register(time_to_wait, play_next_word, NULL);
   } else {
-    // 🟢 THE TRUE END-POP FIX: Wait 2500ms before killing the app! 
-    // The speaker_engine takes 500ms to push padding + 1500ms to drain. 
-    // If the app exits before that 2000ms finishes, the OS causes a pop.
+    // Wait 2500ms before killing the app.
+    // The speaker_engine takes 500ms to push padding + 1500ms to drain.
+    // Exiting before 2000ms kills the process and OS power-gates the DAC instantly.
     if (s_auto_exit) {
       s_queue_timer = app_timer_register(clip_duration_ms + 2500, exit_app_callback, NULL);
     } else {

@@ -1,3 +1,10 @@
+/*
+ * WhisperClock - Gesture Engine Header
+ * Copyright (c) 2026 J_B
+ *
+ * Released under the MIT License.
+ */
+
 #pragma once
 #include <pebble.h>
 

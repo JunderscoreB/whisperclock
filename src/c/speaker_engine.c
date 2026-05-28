@@ -1,18 +1,14 @@
 /*
- * WhisperClock
+ * WhisperClock - Speaker Engine Implementation
  * Copyright (c) 2026 J_B
  *
  * Released under the MIT License.
- *
- * AI Disclosure: Portions of this file, including system architecture, 
- * audio upsampling algorithms, and preprocessor UI toggles, were 
- * generated and optimized with the assistance of generative AI 
- * (Google Gemini).
  */
 
 #include "speaker_engine.h"
 #include "settings_engine.h" 
 
+// The size of the audio chunks fed to the Pebble DAC DMA pipeline
 #define AUDIO_CHUNK_SIZE 512
 #define CHUNK_DELAY_MS 20 
 
@@ -22,6 +18,10 @@ void speaker_init(void) {
   APP_LOG(APP_LOG_LEVEL_INFO, "16-Bit Realtime Upsampling Engine Initialized.");
 }
 
+/**
+ * @brief Maps dynamic string filenames to compiled static resource IDs.
+ * Uses leading-character fast switching to minimize string comparisons.
+ */
 static uint32_t get_resource_id_for_filename(const char* filename) {
   char first = filename[0];
   if (first == 'i' && strcmp(filename, "its.wav") == 0) return RESOURCE_ID_its;
@@ -83,6 +83,7 @@ static size_t s_stream_offset = 0;
 static AppTimer *s_chunk_timer = NULL;
 static AppTimer *s_shutdown_timer = NULL;
 
+// Blank PCM chunk to feed the speaker driver during pauses to prevent mechanical clicking
 static const uint8_t s_silence_chunk[AUDIO_CHUNK_SIZE] = {0};
 
 void speaker_cancel(void) {
@@ -114,6 +115,10 @@ static void close_stream_callback(void *data) {
     }
 }
 
+/**
+ * @brief Continually feeds the hardware audio stream, pushing empty PCM 
+ * data between tracks to prevent the DAC from underrunning and popping.
+ */
 static void push_audio_chunk(void *data) {
     s_chunk_timer = NULL; 
 
@@ -170,6 +175,7 @@ uint32_t speaker_play_file(const char* filename) {
   uint8_t *raw_buffer = (uint8_t *)malloc(res_size);
   resource_load(res_handle, raw_buffer, res_size);
 
+  // Parse RIFF/WAVE header
   uint32_t data_offset = 44;
   uint32_t data_size = res_size > 44 ? res_size - 44 : 0;
 
@@ -187,6 +193,8 @@ uint32_t speaker_play_file(const char* filename) {
   }
 
   size_t original_audio_len = data_size;
+  
+  // Apply dynamic clip trimming
   size_t trim_bytes = (s_settings.clip_trim * 16);
   if (original_audio_len > trim_bytes + 512) {
       original_audio_len -= trim_bytes; 
@@ -203,15 +211,18 @@ uint32_t speaker_play_file(const char* filename) {
       fade_samples = original_audio_len / 2;
   }
 
+  // 16-Bit Upsampling & Software Volume Routine
   for (size_t i = 0; i < original_audio_len; i++) {
+      // 8-bit unsigned PCM defaults to center 128. Subtract to get signed amplitude.
       int32_t sample = (int32_t)raw_buffer[data_offset + i] - 128;
-      sample = sample * 256; 
+      sample = sample * 256; // Upsample scale to 16-bit
       
-      // Perfect software volume scaling
+      // Apply pure software volume scaling to bypass OS limitations
       if (play_volume < 100) {
           sample = (sample * (int32_t)play_volume) / 100;
       }
 
+      // Attack/Release envelope smoothing to prevent waveform discontinuity clicks
       if (i < fade_samples) {
           sample = (sample * (int32_t)i) / (int32_t)fade_samples;
       } else if (i > original_audio_len - fade_samples) {
@@ -222,13 +233,14 @@ uint32_t speaker_play_file(const char* filename) {
       audio_samples[i] = (int16_t)sample;
   }
 
+  // Ensure last sample zeros out cleanly
   if (original_audio_len > 0) {
       audio_samples[original_audio_len - 1] = 0;
   }
 
   free(raw_buffer); 
   
-  s_current_res_size = original_audio_len * 2;
+  s_current_res_size = original_audio_len * 2; // Size doubled due to 16-bit conversion
   s_stream_offset = 0; 
   uint32_t duration_ms = original_audio_len / 16; 
 
@@ -247,7 +259,7 @@ uint32_t speaker_play_file(const char* filename) {
       }
   }
   
-  // 🟢 THE DELAY UX FIX: Wait 1500ms after the final word finishes before triggering the walkie-talkie click
+  // Power-gate delay: Keep stream alive 1500ms after audio ends to prevent click noise
   s_shutdown_timer = app_timer_register(duration_ms + 1500, close_stream_callback, NULL);
 
   return duration_ms; 

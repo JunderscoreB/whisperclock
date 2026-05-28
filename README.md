@@ -2,7 +2,7 @@
 
 WhisperClock is a highly customizable, stealthy time-telling app for Pebble smartwatches. It allows you to check the time privately by holding the watch to your ear and triggering a spoken audio announcement.
 
-Designed for maximum reliability and efficiency, WhisperClock v1.0 completely bypasses background sensors by default, ensuring the app consumes **zero battery** when not actively speaking the time.
+Designed for maximum reliability and efficiency, WhisperClock completely bypasses background sensors by default, ensuring the app consumes **zero battery** when not actively speaking the time.
 
 ## ✨ Key Features
 
@@ -43,7 +43,7 @@ Want a truly hands-free experience? WhisperClock contains a hidden background ph
 
 To enable it, open WhisperClock and toggle **Beta Features** to **ON**. The menu will dynamically expand to reveal the physics settings:
 * **Hardware Tap Detection:** Wake the app by rhythmically knocking on the watch glass. Set your required "Knock Count" (2 to 5 taps) to prevent accidental triggers.
-* **Custom DTW Gestures:** Record a custom arm motion (like raising your arm to your ear). WhisperClock uses Dynamic Time Warping (DTW) to match your movement in the background.
+* **Custom DTW Gestures:** Train the watch to recognize a specific arm motion (like raising your wrist to your ear). Tap **Record Gesture**, wait for the 3-second green countdown, and perform your motion. WhisperClock will save this 3D spatial template and use Dynamic Time Warping (DTW) to match your movement in the background.
 * **Quiet Time Aware:** Automatically mutes the background worker and suspends the accelerometer if your Pebble is in Do Not Disturb mode or within your configured sleep hours.
 
 *(Note: Enabling Beta features activates the Pebble background worker and 25Hz accelerometer polling, which will have a minor impact on daily battery life).*
@@ -55,7 +55,8 @@ To enable it, open WhisperClock and toggle **Beta Features** to **ON**. The menu
 WhisperClock is built to be a modern, highly optimized Pebble app that takes full advantage of the latest hardware and algorithmic techniques:
 
 * **Pebble Time 2 Touch Support:** Fully supports the Emery hardware architecture. WhisperClock implements custom `#ifdef PBL_TOUCH` physics, allowing users to scroll smoothly through the dynamic settings menu using the touch bezel.
-* **Dynamic Time Warping (DTW):** The Beta gesture recognition engine doesn't rely on simple threshold triggers. It records a 3D spatial array of your wrist movement and utilizes a lightweight DTW algorithm to map and identify the specific topological shape of your gesture in real-time.
+* **Kinetic Momentum Scrolling:** Because native PebbleOS lacks inertial scrolling for touch-enabled windows, WhisperClock implements a custom 40 FPS kinetic physics loop. It tracks physical finger velocity during drag events and applies mathematical friction upon liftoff to simulate weight and momentum, complete with touch-to-catch stopping.
+* **Dynamic Time Warping (DTW):** The Beta gesture engine doesn't rely on simple threshold triggers. It records a 3D spatial array of your wrist movement and utilizes a DTW algorithm to map the specific topological shape of your gesture. Furthermore, the algorithm is heavily optimized for embedded limits, utilizing a rolling 1D array to achieve $O(N)$ space complexity so it fits safely inside the Pebble's strict 10KB background RAM limit.
 * **Smart Tap Debouncing:** The acoustic glass-tapping feature uses complex 3-axis math (`z_shock_sq > xy_shock_sq / 2`) to differentiate a deliberate glass knock from general wrist wobble. It also includes strict millisecond debouncing to reject mechanical recoil and false positives.
 * **Live DSP Previews:** A custom UI overlay allows you to instantly test your Interval, Trim, and Volume settings directly inside the app without having to trigger the Quick Launch.
 * **OTA-Safe Memory Architecture:** Built with strict boundary-checked persistent storage (`persist_read_data`), allowing users to safely update the app from the Rebble Store to newer versions without ever wiping their saved preferences.
@@ -76,6 +77,12 @@ If you are interested in translating the app and recording a voice pack, please 
 This app employs a highly specialized audio engine to circumvent a known hardware/firmware constraint on the Pebble Time 2. The PebbleOS kernel power-gates the Class-D smart amplifier immediately upon calling `speaker_stream_close()`, causing a mechanical pop as the capacitors discharge. Furthermore, the `speaker_stream_open()` API ignores user volume arguments.
 
 To solve this, WhisperClock handles all volume attenuation mathematically in user-space software to prevent starvation, pushes a continuous drip-feed of pure digital silence to the DMA pipeline between words to keep the speaker cone centered, and utilizes an intentional 1500ms delay before stream shutdown to ensure the hardware power-gate only occurs after the user has lowered their wrist.
+
+## 🐛 Known Issues & Limitations
+
+* **The Hardware "Pop":** You will hear a faint mechanical click about 1.5 seconds after the time finishes speaking. This is a known hardware limitation of the Pebble Time 2's Class-D amplifier power-gating, which is aggressively managed by the PebbleOS Kernel to save battery. We intentionally delayed this shutdown by 1500ms so it occurs after you have lowered your wrist.
+* **Firmware Volume Override:** The PebbleOS `speaker_stream_open` API currently ignores volume parameters and defaults to 100% hardware gain. WhisperClock handles your volume preference purely in software to bypass this, but the hardware amplifier is still fully pressurized during playback.
+* **Beta Physics Battery Drain:** Using the standard "Quick Launch" method uses 0% background battery. However, enabling the Beta Gestures & Tapping requires the Pebble to keep its background worker and accelerometer running at 25Hz. This will have a minor but noticeable impact on your smartwatch's multi-day battery life.
 
 ## ⚖️ License & Credits
 
@@ -103,4 +110,3 @@ SOFTWARE.
 
 ## 🤖 AI Disclosure
 Parts of the codebase, specifically the 16-bit audio upsampling algorithms, accelerometer physics engine, and dynamic UI toggles, were generated and optimized with the assistance of generative AI (Google Gemini).
-

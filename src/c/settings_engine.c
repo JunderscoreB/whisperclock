@@ -1,15 +1,11 @@
 /*
- * WhisperClock
+ * WhisperClock - Settings Engine Implementation
  * Copyright (c) 2026 J_B
  *
  * Released under the MIT License.
- *
- * AI Disclosure: Portions of this file, including system architecture, 
- * audio upsampling algorithms, and preprocessor UI toggles, were 
- * generated and optimized with the assistance of generative AI 
- * (Google Gemini).
  */
 
+#include <pebble.h>
 #include "settings_engine.h"
 #include <stdlib.h> 
 #include "gesture_engine.h" 
@@ -24,6 +20,7 @@ static SimpleMenuLayer *s_simple_menu_layer = NULL;
 static SimpleMenuSection s_menu_sections[1];
 static SimpleMenuItem s_menu_items[20]; // Expanded to hold all items dynamically
 
+// Static text buffers for dynamic menu labels
 static char s_volume_text[16];
 static char s_speed_text[24]; 
 static char s_trim_text[24]; 
@@ -38,15 +35,22 @@ static TextLayer *s_about_text_layer = NULL;
 static Window *s_confirm_window = NULL;
 static TextLayer *s_confirm_text_layer = NULL;
 
+// External Audio Engine Hooks
 extern void trigger_playback(bool auto_exit);
 extern void cancel_playback(void);
-static void build_menu_items(void); // Forward declaration
+static void build_menu_items(void);
 
+/**
+ * @brief Saves the current settings to persistent storage.
+ */
 static void save_settings() {
   persist_write_data(SETTINGS_PERSIST_KEY, &s_settings, sizeof(WhisperSettings));
 }
 
-// Helper to force Pebble to recalculate the scroll boundary when the accordion changes
+/**
+ * @brief Helper to force Pebble to recalculate the scroll boundary 
+ * when the accordion menu expands or collapses.
+ */
 static void update_menu_and_save() {
   save_settings();
   build_menu_items();
@@ -57,6 +61,7 @@ static void update_menu_and_save() {
 }
 
 void settings_init() {
+  // Establish safe defaults
   s_settings.say_its = true;
   s_settings.playback_speed = 50; 
   s_settings.gesture_buffer_size = 25; 
@@ -71,6 +76,7 @@ void settings_init() {
   s_settings.quiet_end_hour = 7; 
   s_settings.enable_beta_features = false;   
 
+  // Load user preferences, falling back gracefully if version mismatch occurs
   if (persist_exists(SETTINGS_PERSIST_KEY)) {
     int bytes_read = persist_read_data(SETTINGS_PERSIST_KEY, &s_settings, sizeof(WhisperSettings));
     
@@ -79,6 +85,7 @@ void settings_init() {
         s_settings.enable_beta_features = false; 
     }
     
+    // Sanitize loaded values to prevent out-of-bounds crashes
     if (s_settings.volume < 1 || s_settings.volume > 100) s_settings.volume = 60;
     if (s_settings.playback_speed < 50 || s_settings.playback_speed > 500) s_settings.playback_speed = 50;
     if (s_settings.clip_trim < 0 || s_settings.clip_trim > 450) s_settings.clip_trim = 0; 
@@ -90,7 +97,7 @@ void settings_init() {
 }
 
 // -----------------------------------------------------
-// CALLBACK FUNCTIONS
+// CALLBACK FUNCTIONS (All using the unified UI helper)
 // -----------------------------------------------------
 
 static void toggle_beta_callback(int index, void *context) {
@@ -214,6 +221,9 @@ static void change_trim_callback(int index, void *context) {
   update_menu_and_save();
 }
 
+// -----------------------------------------------------------------------------
+// SPEAKING UI OVERLAY
+// -----------------------------------------------------------------------------
 static Window *s_speaking_window = NULL;
 static TextLayer *s_time_text_layer = NULL;
 static TextLayer *s_speaking_text_layer = NULL;
@@ -226,11 +236,12 @@ static void speaking_tick_handler(struct tm *tick_time, TimeUnits units_changed)
 }
 
 static void speaking_click_handler(ClickRecognizerRef recognizer, void *context) {
-  cancel_playback();
+  cancel_playback(); // Halt audio engine immediately
   hide_speaking_graphic(); 
 }
 
 static void speaking_click_config_provider(void *context) {
+  // Bind all buttons to cancel playback for stealth/discretion
   window_single_click_subscribe(BUTTON_ID_SELECT, speaking_click_handler);
   window_single_click_subscribe(BUTTON_ID_UP, speaking_click_handler);
   window_single_click_subscribe(BUTTON_ID_DOWN, speaking_click_handler);
@@ -238,16 +249,20 @@ static void speaking_click_config_provider(void *context) {
 }
 
 static void speaking_window_load(Window *window) {
-  Layer *window_layer = window_get_root_layer(window); GRect bounds = layer_get_bounds(window_layer);
+  Layer *window_layer = window_get_root_layer(window); 
+  GRect bounds = layer_get_bounds(window_layer);
+
 #if defined(PBL_RGB_BACKLIGHT)
-  light_set_color(GColorBlack);
+  light_set_color(GColorBlack); // Stealth mode: disable backlight if possible
 #endif
+
   s_time_text_layer = text_layer_create(GRect(0, bounds.size.h / 2 - 45, bounds.size.w, 50));
   text_layer_set_background_color(s_time_text_layer, GColorClear);
   text_layer_set_text_color(s_time_text_layer, GColorBlack);
   text_layer_set_font(s_time_text_layer, fonts_get_system_font(FONT_KEY_BITHAM_34_MEDIUM_NUMBERS));
   text_layer_set_text_alignment(s_time_text_layer, GTextAlignmentCenter);
   layer_add_child(window_layer, text_layer_get_layer(s_time_text_layer));
+
   s_speaking_text_layer = text_layer_create(GRect(0, bounds.size.h / 2 + 5, bounds.size.w, 30));
   text_layer_set_text(s_speaking_text_layer, "Speaking...");
   text_layer_set_font(s_speaking_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD));
@@ -267,10 +282,13 @@ static void speaking_window_appear(Window *window) {
   tick_timer_service_subscribe(SECOND_UNIT, speaking_tick_handler);
 }
 
-static void speaking_window_disappear(Window *window) { tick_timer_service_unsubscribe(); }
+static void speaking_window_disappear(Window *window) { 
+  tick_timer_service_unsubscribe(); 
+}
+
 static void speaking_window_unload(Window *window) {
 #if defined(PBL_RGB_BACKLIGHT)
-  light_set_system_color();
+  light_set_system_color(); // Restore system backlight settings
 #endif
   if (s_time_text_layer) text_layer_destroy(s_time_text_layer);
   if (s_speaking_text_layer) text_layer_destroy(s_speaking_text_layer);
@@ -285,7 +303,10 @@ void show_speaking_graphic() {
   window_stack_push(s_speaking_window, true);
 }
 
-void hide_speaking_graphic() { if (s_speaking_window) window_stack_remove(s_speaking_window, true); }
+void hide_speaking_graphic() { 
+  if (s_speaking_window) window_stack_remove(s_speaking_window, true); 
+}
+
 static void show_about_callback(int index, void *context);
 static void test_audio_callback(int index, void *context) { show_speaking_graphic(); trigger_playback(false); }
 
@@ -301,7 +322,7 @@ static void build_menu_items() {
   if (s_settings.clock_mode == 1) clock_text = "Force 12-Hour";
   if (s_settings.clock_mode == 2) clock_text = "Force 24-Hour";
 
-  int i = 0;
+  int i = 0; // Dynamic indexer to prevent empty rows when accordion is closed
 
   s_menu_items[i++] = (SimpleMenuItem) { 
       .title = "Beta Features", 
@@ -311,6 +332,7 @@ static void build_menu_items() {
   
   s_menu_items[i++] = (SimpleMenuItem) { .title = "Clock Mode", .subtitle = clock_text, .callback = toggle_clock_mode_callback };
 
+  // Expand the accordion if Beta is ON
   if (s_settings.enable_beta_features) {
       char *trigger_text = "Gesture Sweep";
       if (s_settings.trigger_mode == 1) trigger_text = "Glass Tapping";
@@ -337,6 +359,7 @@ static void build_menu_items() {
       s_menu_items[i++] = (SimpleMenuItem) { .title = "Recording Time", .subtitle = time_text, .callback = change_record_time_callback };
   }
 
+  // Standard items appended after the accordion block
   s_menu_items[i++] = (SimpleMenuItem) { .title = "Prefix: \"It's\"", .subtitle = s_settings.say_its ? "Enabled" : "Disabled", .callback = toggle_its_callback };
   s_menu_items[i++] = (SimpleMenuItem) { .title = "Speak AM/PM", .subtitle = s_settings.say_ampm ? "Enabled" : "Disabled", .callback = toggle_ampm_callback };
   s_menu_items[i++] = (SimpleMenuItem) { .title = "Speaker Volume", .subtitle = s_volume_text, .callback = change_volume_callback };
@@ -351,7 +374,7 @@ static void build_menu_items() {
 }
 
 // -----------------------------------------------------------------------------
-// 🟢 KINETIC PHYSICS ENGINE (PBL_TOUCH)
+// KINETIC PHYSICS ENGINE (PBL_TOUCH)
 // -----------------------------------------------------------------------------
 #ifdef PBL_TOUCH
 static int16_t s_touch_start_y = 0;
@@ -368,6 +391,9 @@ static void kill_kinetic_timer() {
   }
 }
 
+/**
+ * @brief Safely applies a vertical scroll delta while enforcing physical layer boundaries.
+ */
 static void apply_clamped_scroll(ScrollLayer *layer, int16_t delta_y) {
   GPoint offset = scroll_layer_get_content_offset(layer);
   offset.y += delta_y;
@@ -375,7 +401,7 @@ static void apply_clamped_scroll(ScrollLayer *layer, int16_t delta_y) {
   int content_h = scroll_layer_get_content_size(layer).h;
   int layer_h = layer_get_bounds(scroll_layer_get_layer(layer)).size.h;
   int max_scroll = -(content_h - layer_h);
-  if (max_scroll > 0) max_scroll = 0;
+  if (max_scroll > 0) max_scroll = 0; // Prevent upward overscroll if content is small
   
   if (offset.y > 0) offset.y = 0;
   if (offset.y < max_scroll) offset.y = max_scroll;
@@ -383,7 +409,10 @@ static void apply_clamped_scroll(ScrollLayer *layer, int16_t delta_y) {
   scroll_layer_set_content_offset(layer, offset, false);
 }
 
-// The friction loop that simulates physical momentum!
+/**
+ * @brief The friction loop simulating physical momentum for touch interfaces.
+ * Decays velocity by 10% each frame (25ms).
+ */
 static void kinetic_timer_callback(void *data) {
   ScrollLayer *scroll_layer = (ScrollLayer *)data;
   if (!scroll_layer) return;
@@ -392,10 +421,10 @@ static void kinetic_timer_callback(void *data) {
   apply_clamped_scroll(scroll_layer, s_scroll_velocity);
   GPoint new_offset = scroll_layer_get_content_offset(scroll_layer);
 
-  // Apply friction (retards speed by 10% every frame)
+  // Apply friction
   s_scroll_velocity = (s_scroll_velocity * 90) / 100;
 
-  // Stop if velocity is dead or we hit a physical scrolling boundary
+  // Stop if velocity is dead or we hit a physical boundary
   if (abs(s_scroll_velocity) <= 1 || old_offset.y == new_offset.y) {
     s_scroll_velocity = 0;
     s_kinetic_timer = NULL;
@@ -414,7 +443,7 @@ static void menu_touch_handler(const TouchEvent *event, void *context) {
     s_touch_last_y = event->y;
     s_is_drag = false;
     
-    // The user touched the screen! Instantly stop any kinetic gliding.
+    // Tap to kill momentum
     s_scroll_velocity = 0;
     kill_kinetic_timer();
   } 
@@ -425,21 +454,20 @@ static void menu_touch_handler(const TouchEvent *event, void *context) {
     
     if (s_is_drag) {
       int16_t delta_y = event->y - s_touch_last_y;
-      
-      // Track the raw velocity of the finger!
-      s_scroll_velocity = delta_y; 
-      
+      s_scroll_velocity = delta_y; // Track raw finger velocity
       apply_clamped_scroll(scroll_layer, delta_y);
       s_touch_last_y = event->y;
     }
   } 
   else if (event->type == TouchEvent_Liftoff) {
     if (!s_is_drag) {
-      // It was a tap! Calculate the row, accounting for the 16px Section Header offset.
+      // Direct Tap Logic
       GPoint offset = scroll_layer_get_content_offset(scroll_layer);
       int16_t content_y = event->y - offset.y; 
       int total_rows = s_menu_sections[0].num_items;
-      int16_t header_height = 16;
+      
+      // Correct for the 16px Section Header offset built into SimpleMenuLayer
+      int16_t header_height = 16; 
       
       if (content_y >= header_height) {
           int content_h = scroll_layer_get_content_size(scroll_layer).h;
@@ -460,7 +488,7 @@ static void menu_touch_handler(const TouchEvent *event, void *context) {
           }
       }
     } else {
-      // It was a drag! If speed is high enough, trigger the physics momentum loop.
+      // Finger lift: trigger physics engine if throwing fast enough
       if (abs(s_scroll_velocity) > 2) {
           s_kinetic_timer = app_timer_register(25, kinetic_timer_callback, scroll_layer);
       }
@@ -508,13 +536,14 @@ static void about_touch_handler(const TouchEvent *event, void *context) {
 // ABOUT WINDOW
 // -----------------------------------------------------------------------------
 static void about_window_load(Window *window) {
-  Layer *window_layer = window_get_root_layer(window); GRect bounds = layer_get_bounds(window_layer);
+  Layer *window_layer = window_get_root_layer(window); 
+  GRect bounds = layer_get_bounds(window_layer);
 
   s_about_scroll_layer = scroll_layer_create(bounds);
   scroll_layer_set_click_config_onto_window(s_about_scroll_layer, window);
 
   const char *about_text = 
-  "WhisperClock v1.0\n\n"
+  "WhisperClock v0.9 RC1\n\n"
   "A stealthy, spoken time check for your Pebble.\n\n"
   "--- HOW TO USE ---\n"
   "1. Map WhisperClock to 'Quick Launch' in your Pebble settings.\n"
@@ -575,11 +604,14 @@ static void show_about_callback(int index, void *context) {
 // MAIN MENU WINDOW
 // -----------------------------------------------------------------------------
 static void menu_window_load(Window *window) {
+  // Suspend worker polling while user is configuring settings to save CPU
   app_worker_kill();
 
   build_menu_items();
 
-  Layer *window_layer = window_get_root_layer(window); GRect bounds = layer_get_bounds(window_layer);
+  Layer *window_layer = window_get_root_layer(window); 
+  GRect bounds = layer_get_bounds(window_layer);
+  
   s_simple_menu_layer = simple_menu_layer_create(bounds, window, s_menu_sections, 1, NULL);
   menu_layer_set_click_config_onto_window(simple_menu_layer_get_menu_layer(s_simple_menu_layer), window);
   layer_add_child(window_layer, simple_menu_layer_get_layer(s_simple_menu_layer));
@@ -599,10 +631,11 @@ static void menu_window_disappear(Window *window) {
 
 static void menu_window_unload(Window *window) {
 #ifdef PBL_TOUCH
-  kill_kinetic_timer(); // Safety: prevent segfaults!
+  kill_kinetic_timer(); 
 #endif
   if (s_simple_menu_layer) simple_menu_layer_destroy(s_simple_menu_layer);
   
+  // Re-launch physics engine upon exit if Beta is active
   if (s_settings.enable_beta_features) {
       app_worker_launch();
   }

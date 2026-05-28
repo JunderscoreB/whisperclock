@@ -1,3 +1,10 @@
+/*
+ * WhisperClock - Gesture Engine Implementation
+ * Copyright (c) 2026 J_B
+ *
+ * Released under the MIT License.
+ */
+
 #include <pebble.h>
 #include "gesture_engine.h"
 #include "settings_engine.h"
@@ -12,6 +19,7 @@ typedef struct {
   int16_t x; int16_t y; int16_t z;
 } CustomAccelData;
 
+// Buffer to store the recorded gesture points which will be persisted to memory
 static CustomAccelData s_gesture_template[MAX_BUFFER_SIZE];
 static int s_recording_index = 0;
 
@@ -41,6 +49,10 @@ void on_gesture_detected() {
 static uint32_t s_last_tap_epoch_ms = 0;
 static int s_current_taps = 0;
 
+/**
+ * @brief Foreground fallback tap handler, used primarily when testing 
+ * gesture configurations inside the app. Background processing handled by worker.
+ */
 static void accel_tap_handler(AccelAxisType axis, int32_t direction) {
   if (s_is_recording) return;
 
@@ -110,6 +122,8 @@ static void finish_recording(void *data) {
   s_countdown_timer = NULL;
   accel_data_service_unsubscribe();
   s_is_recording = false; 
+  
+  // Write the recorded spatial template array to persistence for the DTW worker
   persist_write_data(GESTURE_PERSIST_KEY, s_gesture_template, sizeof(s_gesture_template));
   
   window_set_background_color(s_recording_window, GColorRed);
@@ -156,7 +170,6 @@ static void cancel_recording_handler(ClickRecognizerRef recognizer, void *contex
 }
 
 #ifdef PBL_TOUCH
-// 🟢 NEW: Added a Touch Handler for the recording screen so you can tap to cancel!
 static void recording_touch_handler(const TouchEvent *event, void *context) {
   if (event->type == TouchEvent_Touchdown) {
     cancel_recording_handler(NULL, NULL);
@@ -200,7 +213,6 @@ static void recording_window_load(Window *window) {
   s_ready_timer = app_timer_register(3000, start_listening, NULL);
 }
 
-// 🟢 NEW: Subscribing to touch events during the recording process
 static void recording_window_appear(Window *window) {
 #ifdef PBL_TOUCH
   if (touch_service_is_enabled()) touch_service_subscribe(recording_touch_handler, NULL);

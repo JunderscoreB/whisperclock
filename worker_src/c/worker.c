@@ -1,13 +1,8 @@
 /*
- * WhisperClock
+ * WhisperClock - Background Physics Worker
  * Copyright (c) 2026 J_B
  *
  * Released under the MIT License.
- *
- * AI Disclosure: Portions of this file, including system architecture, 
- * audio upsampling algorithms, and preprocessor UI toggles, were 
- * generated and optimized with the assistance of generative AI 
- * (Google Gemini).
  */
 
 #include <pebble_worker.h>
@@ -17,6 +12,7 @@
 #define SETTINGS_PERSIST_KEY 3 
 #define WAKE_REASON_PERSIST_KEY 4 
 
+// Helper macro for calculating 3-way minimums in the DTW algorithm
 #define MIN3(a, b, c) ((a) < (b) ? ((a) < (c) ? (a) : (c)) : ((b) < (c) ? (b) : (c)))
 
 typedef struct __attribute__((__packed__)) {
@@ -55,10 +51,13 @@ static bool s_has_trained_gesture = false;
 static int s_current_buffer_size = 25; 
 
 static CustomAccelData s_gesture_template[MAX_BUFFER_SIZE]; 
+
+// O(N) Space Complexity optimization for DTW: 
+// Only stores the previous and current rows instead of a full NxM matrix.
 static int32_t s_prev_row[MAX_BUFFER_SIZE];
 static int32_t s_curr_row[MAX_BUFFER_SIZE];
-static AccelData s_flat_live_data[MAX_BUFFER_SIZE];
 
+static AccelData s_flat_live_data[MAX_BUFFER_SIZE];
 static CustomAccelData s_centered_live[MAX_BUFFER_SIZE];
 static CustomAccelData s_centered_saved[MAX_BUFFER_SIZE];
 
@@ -77,11 +76,18 @@ static int32_t get_distance(CustomAccelData live_point, CustomAccelData template
          abs(live_point.z - template_point.z);
 }
 
+/**
+ * @brief Dynamic Time Warping (DTW) calculation to match spatial shapes.
+ * Operates in O(N^2) time but uses an O(N) memory trick to fit easily inside 
+ * the tight 10KB background worker RAM limits.
+ */
 static int32_t calculate_dtw_cost(uint32_t length) {
   s_prev_row[0] = get_distance(s_centered_live[0], s_centered_saved[0]);
+  
   for (uint32_t j = 1; j < length; j++) {
     s_prev_row[j] = s_prev_row[j-1] + get_distance(s_centered_live[0], s_centered_saved[j]);
   }
+  
   for (uint32_t i = 1; i < length; i++) {
     s_curr_row[0] = s_prev_row[0] + get_distance(s_centered_live[i], s_centered_saved[0]);
     for (uint32_t j = 1; j < length; j++) {
@@ -112,6 +118,9 @@ static bool is_custom_quiet_time() {
   }
 }
 
+/**
+ * @brief Complex debouncing logic for physical glass tapping detection.
+ */
 static void software_tap_handler(int32_t z_sq, int32_t xy_sq) {
   if (s_worker_settings.trigger_mode == 0) return; // 0 is Gesture Mode. Ignore taps!
   if (is_custom_quiet_time()) return; 
@@ -119,6 +128,7 @@ static void software_tap_handler(int32_t z_sq, int32_t xy_sq) {
   uint32_t ticks_since_last = s_absolute_tick - s_last_tap_tick;
   uint32_t ms_gap = ticks_since_last * 40; 
   
+  // Reject instantaneous shocks (likely spring recoil)
   if (s_last_tap_tick > 0 && ticks_since_last < 3) {
       APP_LOG(APP_LOG_LEVEL_DEBUG, ">>> TAP REJECTED (Too Fast / Recoil): %lu ms", ms_gap);
       return;
@@ -128,7 +138,7 @@ static void software_tap_handler(int32_t z_sq, int32_t xy_sq) {
       s_current_taps = 1;
       APP_LOG(APP_LOG_LEVEL_INFO, ">>> TAP ACCEPTED! Seq: 1/%d (Initial Tap) | Z: %ld", s_worker_settings.tap_count, z_sq);
   } else if (ticks_since_last > 75) { 
-      s_current_taps = 1;
+      s_current_taps = 1; // Expired timeout loop
       APP_LOG(APP_LOG_LEVEL_INFO, ">>> SEQUENCE RESET (Gap: %lu ms > 3000 ms limit). Starting at 1.", ms_gap);
       APP_LOG(APP_LOG_LEVEL_INFO, ">>> TAP ACCEPTED! Seq: 1/%d | Z: %ld", s_worker_settings.tap_count, z_sq);
   } else {
@@ -211,7 +221,7 @@ static void accel_data_handler(AccelData *data, uint32_t num_samples) {
           continue;
       }
 
-      // DTW Buffer Math
+      // DTW Buffer Math (Ring Buffer Fill)
       s_buffer.data[s_buffer.index] = data[i];
       s_buffer.index++;
       
@@ -234,10 +244,11 @@ static void accel_data_handler(AccelData *data, uint32_t num_samples) {
           if (s_buffer.data[j].z > max_z) max_z = s_buffer.data[j].z;
         }
 
-        // Use the XY Multiplier to loosen the motion gate!
+        // Use the XY Multiplier to loosen the motion gate threshold
         int16_t gate = (1200 * 100) / s_worker_settings.xy_multiplier;
         if ((max_x - min_x) < gate && (max_y - min_y) < gate && (max_z - min_z) < gate) continue; 
 
+        // Flatten the ring buffer
         uint32_t flat_index = 0;
         for (uint32_t j = s_buffer.index; j < (uint32_t)s_current_buffer_size; j++) {
           s_flat_live_data[flat_index++] = s_buffer.data[j];
@@ -246,6 +257,7 @@ static void accel_data_handler(AccelData *data, uint32_t num_samples) {
           s_flat_live_data[flat_index++] = s_buffer.data[j];
         }
 
+        // Apply endpoint origin mapping
         int16_t offset_live_x = s_flat_live_data[s_current_buffer_size - 1].x;
         int16_t offset_live_y = s_flat_live_data[s_current_buffer_size - 1].y;
         int16_t offset_live_z = s_flat_live_data[s_current_buffer_size - 1].z;
@@ -263,6 +275,7 @@ static void accel_data_handler(AccelData *data, uint32_t num_samples) {
           int32_t saved_y = s_gesture_template[j].y - offset_saved_y;
           int32_t saved_z = s_gesture_template[j].z - offset_saved_z;
 
+          // Spatial weight attenuation
           int32_t weight = 50 + ((j * 50) / (s_current_buffer_size - 1));
 
           s_centered_live[j].x = (live_x * weight) / 100;
@@ -335,6 +348,7 @@ static void worker_init() {
 
   APP_LOG(APP_LOG_LEVEL_INFO, "=== BACKGROUND WORKER STARTED: READY FOR TAPS/GESTURES ===");
   
+  // Throttle accelerometer sampling to 25Hz to save power during background execution
   accel_data_service_subscribe(5, accel_data_handler);
   accel_service_set_sampling_rate(ACCEL_SAMPLING_25HZ);
 }

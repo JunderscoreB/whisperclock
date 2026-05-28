@@ -1,13 +1,8 @@
 /*
- * WhisperClock
+ * WhisperClock - App Entry Point
  * Copyright (c) 2026 J_B
  *
  * Released under the MIT License.
- *
- * AI Disclosure: Portions of this file, including system architecture, 
- * audio upsampling algorithms, and preprocessor UI toggles, were 
- * generated and optimized with the assistance of generative AI 
- * (Google Gemini).
  */
 
 #include <pebble.h>
@@ -25,6 +20,7 @@ static void init(void) {
 
   AppLaunchReason reason = launch_reason();
 
+  // Route application flow based on system launch trigger
   if (reason == APP_LAUNCH_QUICK_LAUNCH) {
       APP_LOG(APP_LOG_LEVEL_INFO, "App Woken by: QUICK LAUNCH BUTTON");
       show_speaking_graphic();
@@ -40,6 +36,7 @@ static void init(void) {
       trigger_playback(true); 
   }
   else {
+      // Standard Launch: Enter settings menu
       APP_LOG(APP_LOG_LEVEL_INFO, "App Woken by: SYSTEM MENU");
       settings_window_push();
   }
