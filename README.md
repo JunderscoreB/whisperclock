@@ -73,11 +73,6 @@ If you are interested in translating the app and recording a voice pack, please 
 
 ---
 
-## 💻 Developer Notes: The Hardware Power-Gate
-This app employs a highly specialized audio engine to circumvent a known hardware/firmware constraint on the Pebble Time 2. The PebbleOS kernel power-gates the Class-D smart amplifier immediately upon calling `speaker_stream_close()`, causing a mechanical pop as the capacitors discharge. Furthermore, the `speaker_stream_open()` API ignores user volume arguments.
-
-To solve this, WhisperClock handles all volume attenuation mathematically in user-space software to prevent starvation, pushes a continuous drip-feed of pure digital silence to the DMA pipeline between words to keep the speaker cone centered, and utilizes an intentional 1500ms delay before stream shutdown to ensure the hardware power-gate only occurs after the user has lowered their wrist.
-
 ## 🐛 Known Issues & Limitations
 
 * **The Hardware "Pop":** You will hear a faint mechanical click about 1.5 seconds after the time finishes speaking. This is a known hardware limitation of the Pebble Time 2's Class-D amplifier power-gating, which is aggressively managed by the PebbleOS Kernel to save battery. We intentionally delayed this shutdown by 1500ms so it occurs after you have lowered your wrist.
