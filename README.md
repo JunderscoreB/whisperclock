@@ -29,7 +29,7 @@ To get the true WhisperClock experience, map it to a physical hardware button:
 
 Launch WhisperClock normally from your Pebble's main app menu to configure your playback experience. Because Pebble audio can vary heavily depending on the recording, these DSP tools allow you to tune the voice to your exact preference:
 
-* **Speaker Volume (1% - 100%):** A pure software-driven volume scaler that bypasses firmware gain limits, allowing for true "whisper" level playback.
+* **Speaker Volume (1% - 100%):** A pure software-driven volume scaler that bypasses firmware gain limits, allowing for true "whisper" level playback. (Note: at 100% it is no longer whispering!)
 * **Voice Interval:** Speeds up or slows down the physical millisecond pause between each spoken word.
 * **Audio Trim:** Dynamically shaves off the silent tails at the end of each `.wav` file, creating a faster, punchier, and more robotic sentence structure.
 * **Prefix & AM/PM:** Toggle conversational words like "It's" and "AM/PM" to shorten the playback time.
