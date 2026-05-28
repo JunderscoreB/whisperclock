@@ -1,3 +1,15 @@
+/*
+ * WhisperClock
+ * Copyright (c) 2026 J_B
+ *
+ * Released under the MIT License.
+ *
+ * AI Disclosure: Portions of this file, including system architecture, 
+ * audio upsampling algorithms, and preprocessor UI toggles, were 
+ * generated and optimized with the assistance of generative AI 
+ * (Google Gemini).
+ */
+
 #include "speaker_engine.h"
 #include "settings_engine.h" 
 
@@ -7,31 +19,9 @@
 extern WhisperSettings s_settings; 
 
 void speaker_init(void) {
-  APP_LOG(APP_LOG_LEVEL_INFO, "Speaker Engine Initialized.");
+  APP_LOG(APP_LOG_LEVEL_INFO, "16-Bit Realtime Upsampling Engine Initialized.");
 }
 
-static size_t find_wav_data_offset_and_size(const uint8_t *buffer, size_t file_size, size_t *out_data_size) {
-    if (file_size < 44) {
-        *out_data_size = file_size - 44;
-        return 44; 
-    }
-    size_t offset = 12; 
-    while (offset + 8 <= file_size) {
-        uint32_t chunk_size = buffer[offset+4] | (buffer[offset+5] << 8) | 
-                              (buffer[offset+6] << 16) | (buffer[offset+7] << 24);
-
-        if (buffer[offset] == 'd' && buffer[offset+1] == 'a' && 
-            buffer[offset+2] == 't' && buffer[offset+3] == 'a') {
-            *out_data_size = chunk_size; 
-            return offset + 8; 
-        }
-        offset += 8 + chunk_size; 
-    }
-    *out_data_size = file_size - 44;
-    return 44; 
-}
-
-// OPTIMIZATION: Faster lookups by checking first character first
 static uint32_t get_resource_id_for_filename(const char* filename) {
   char first = filename[0];
   if (first == 'i' && strcmp(filename, "its.wav") == 0) return RESOURCE_ID_its;
@@ -89,115 +79,176 @@ static uint8_t *s_audio_buffer = NULL;
 static bool s_is_stream_open = false;
 static size_t s_current_res_size = 0;
 static size_t s_stream_offset = 0;
+
 static AppTimer *s_chunk_timer = NULL;
-static bool s_amp_primed = false;
+static AppTimer *s_shutdown_timer = NULL;
+
+static const uint8_t s_silence_chunk[AUDIO_CHUNK_SIZE] = {0};
 
 void speaker_cancel(void) {
   if (s_chunk_timer) {
     app_timer_cancel(s_chunk_timer);
     s_chunk_timer = NULL;
   }
-  
-  // OPTIMIZATION: Ensure memory is freed if canceled mid-playback
+  if (s_shutdown_timer) {
+    app_timer_cancel(s_shutdown_timer);
+    s_shutdown_timer = NULL;
+  }
   if (s_audio_buffer != NULL) {
       free(s_audio_buffer);
       s_audio_buffer = NULL;
   }
-
   if (s_is_stream_open) {
-    speaker_stop();
+    speaker_stop(); 
     speaker_stream_close();
     s_is_stream_open = false;
   }
 }
 
+static void close_stream_callback(void *data) {
+    s_shutdown_timer = NULL; 
+    if (s_is_stream_open) {
+        speaker_stream_close();
+        s_is_stream_open = false;
+        APP_LOG(APP_LOG_LEVEL_INFO, "Stream closed. Amplifier powered down successfully.");
+    }
+}
+
 static void push_audio_chunk(void *data) {
-    if (!s_is_stream_open || s_audio_buffer == NULL) return;
+    s_chunk_timer = NULL; 
+
+    if (!s_is_stream_open) return;
     
     bool hardware_buffer_full = false;
-    while (s_stream_offset < s_current_res_size && !hardware_buffer_full) {
-        size_t remaining = s_current_res_size - s_stream_offset;
-        size_t chunk = remaining > AUDIO_CHUNK_SIZE ? AUDIO_CHUNK_SIZE : remaining;
-        uint32_t bytes_written = speaker_stream_write(s_audio_buffer + s_stream_offset, chunk);
-        s_stream_offset += bytes_written;
-        if (bytes_written < chunk) hardware_buffer_full = true;
-    }
-    
-    if (s_stream_offset < s_current_res_size) {
-        s_chunk_timer = app_timer_register(CHUNK_DELAY_MS, push_audio_chunk, NULL);
-    } else {
-        s_chunk_timer = NULL; 
+
+    if (s_audio_buffer != NULL) {
+        // Push Real Audio
+        while (s_stream_offset < s_current_res_size && !hardware_buffer_full) {
+            uint32_t chunk = s_current_res_size - s_stream_offset;
+            if (chunk > AUDIO_CHUNK_SIZE) chunk = AUDIO_CHUNK_SIZE;
+            
+            uint32_t written = speaker_stream_write(s_audio_buffer + s_stream_offset, chunk);
+            s_stream_offset += written;
+            
+            if (written < chunk) {
+                hardware_buffer_full = true;
+            }
+        }
         
-        // OPTIMIZATION: Critical memory cleanup immediately after the last byte is queued
-        if (s_audio_buffer != NULL) {
+        if (s_stream_offset >= s_current_res_size) {
             free(s_audio_buffer);
             s_audio_buffer = NULL;
         }
+    } else {
+        // Active Silence Drip-Feed: Keeps the DAC pipeline full between words and during the 1.5s delay!
+        while (!hardware_buffer_full) {
+            uint32_t written = speaker_stream_write(s_silence_chunk, AUDIO_CHUNK_SIZE);
+            if (written < AUDIO_CHUNK_SIZE) {
+                hardware_buffer_full = true;
+            }
+        }
     }
+    
+    // Engine stays alive until the sentence shutdown timer kills the stream
+    s_chunk_timer = app_timer_register(CHUNK_DELAY_MS, push_audio_chunk, NULL);
 }
 
 uint32_t speaker_play_file(const char* filename) {
   uint32_t res_id = get_resource_id_for_filename(filename);
-  if (res_id != 0) {
-    APP_LOG(APP_LOG_LEVEL_INFO, "PLAYING: %s", filename);
+  if (res_id == 0) return 0;
     
-    speaker_cancel();
+  if (s_audio_buffer != NULL) {
+      free(s_audio_buffer);
+      s_audio_buffer = NULL;
+  }
 
-    ResHandle res_handle = resource_get_handle(res_id);
-    if (!res_handle) return 0;
-    size_t res_size = resource_size(res_handle);
+  ResHandle res_handle = resource_get_handle(res_id);
+  size_t res_size = resource_size(res_handle);
+  
+  if (res_size < 44) return 0; 
 
-    s_audio_buffer = (uint8_t *)malloc(res_size);
-    if (s_audio_buffer == NULL) return 0;
-    resource_load(res_handle, s_audio_buffer, res_size);
+  uint8_t *raw_buffer = (uint8_t *)malloc(res_size);
+  resource_load(res_handle, raw_buffer, res_size);
 
-    size_t actual_data_length = 0;
-    s_stream_offset = find_wav_data_offset_and_size(s_audio_buffer, res_size, &actual_data_length); 
+  uint32_t data_offset = 44;
+  uint32_t data_size = res_size > 44 ? res_size - 44 : 0;
 
-    size_t trim_bytes = (s_settings.clip_trim * 16);
-    if (actual_data_length > trim_bytes) actual_data_length -= trim_bytes; 
-    else actual_data_length = 0; 
+  for (uint32_t i = 12; i < res_size - 8; ) {
+      if (raw_buffer[i] == 'd' && raw_buffer[i+1] == 'a' &&
+          raw_buffer[i+2] == 't' && raw_buffer[i+3] == 'a') {
+          data_size = raw_buffer[i+4] | (raw_buffer[i+5] << 8) |
+                      (raw_buffer[i+6] << 16) | (raw_buffer[i+7] << 24);
+          data_offset = i + 8;
+          break;
+      }
+      uint32_t chunk_size = raw_buffer[i+4] | (raw_buffer[i+5] << 8) |
+                            (raw_buffer[i+6] << 16) | (raw_buffer[i+7] << 24);
+      i += 8 + chunk_size;
+  }
 
-    if (s_stream_offset + actual_data_length > res_size) {
-        actual_data_length = res_size - s_stream_offset;
-    }
+  size_t original_audio_len = data_size;
+  size_t trim_bytes = (s_settings.clip_trim * 16);
+  if (original_audio_len > trim_bytes + 512) {
+      original_audio_len -= trim_bytes; 
+  }
 
-    s_current_res_size = s_stream_offset + actual_data_length;
+  s_audio_buffer = (uint8_t *)malloc(original_audio_len * 2);
+  int16_t *audio_samples = (int16_t *)s_audio_buffer;
 
-    // OPTIMIZATION: Single pass to remove DC offset. 
-    for (size_t i = s_stream_offset; i < s_current_res_size; i++) {
-        s_audio_buffer[i] -= 128;
-    }
+  uint32_t play_volume = s_settings.volume; 
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "Audio DSP | %s | Software Vol: %lu%%", filename, play_volume);
 
-    // Fades
-    size_t fade_samples = 64;
-    if (actual_data_length > fade_samples * 2) {
-        for (size_t i = 0; i < fade_samples; i++) {
-            int8_t *sample_in = (int8_t *)&s_audio_buffer[s_stream_offset + i];
-            *sample_in = (int8_t)((*sample_in * (int)i) / fade_samples);
+  size_t fade_samples = 1024; 
+  if (original_audio_len < fade_samples * 2) {
+      fade_samples = original_audio_len / 2;
+  }
 
-            int8_t *sample_out = (int8_t *)&s_audio_buffer[s_current_res_size - fade_samples + i];
-            *sample_out = (int8_t)((*sample_out * (int)(fade_samples - i)) / fade_samples);
-        }
-    }
+  for (size_t i = 0; i < original_audio_len; i++) {
+      int32_t sample = (int32_t)raw_buffer[data_offset + i] - 128;
+      sample = sample * 256; 
+      
+      // Perfect software volume scaling
+      if (play_volume < 100) {
+          sample = (sample * (int32_t)play_volume) / 100;
+      }
 
-    uint8_t play_volume = (s_settings.volume >= 10 && s_settings.volume <= 100) ? s_settings.volume : 60;
+      if (i < fade_samples) {
+          sample = (sample * (int32_t)i) / (int32_t)fade_samples;
+      } else if (i > original_audio_len - fade_samples) {
+          int32_t fade_out_idx = original_audio_len - i;
+          sample = (sample * fade_out_idx) / (int32_t)fade_samples;
+      }
 
-    if (!s_amp_primed) {
-        if (speaker_stream_open(SpeakerPcmFormat_16kHz_8bit, play_volume)) {
-            uint8_t silence_frame[32] = {0}; 
-            speaker_stream_write(silence_frame, sizeof(silence_frame));
-            speaker_stop();
-            speaker_stream_close();
-            s_amp_primed = true;
-        }
-    }
+      audio_samples[i] = (int16_t)sample;
+  }
 
-    if (speaker_stream_open(SpeakerPcmFormat_16kHz_8bit, play_volume)) {
-        s_is_stream_open = true;
-        push_audio_chunk(NULL); 
-        return actual_data_length / 16;
-    }
-  } 
-  return 0; 
+  if (original_audio_len > 0) {
+      audio_samples[original_audio_len - 1] = 0;
+  }
+
+  free(raw_buffer); 
+  
+  s_current_res_size = original_audio_len * 2;
+  s_stream_offset = 0; 
+  uint32_t duration_ms = original_audio_len / 16; 
+
+  if (s_shutdown_timer) {
+      app_timer_cancel(s_shutdown_timer);
+      s_shutdown_timer = NULL;
+  }
+
+  if (!s_is_stream_open) {
+      if (speaker_stream_open(SpeakerPcmFormat_16kHz_16bit, 100)) {
+          s_is_stream_open = true;
+          push_audio_chunk(NULL); 
+      } else {
+          APP_LOG(APP_LOG_LEVEL_ERROR, "Failed to open speaker stream!");
+          return 0; 
+      }
+  }
+  
+  // 🟢 THE DELAY UX FIX: Wait 1500ms after the final word finishes before triggering the walkie-talkie click
+  s_shutdown_timer = app_timer_register(duration_ms + 1500, close_stream_callback, NULL);
+
+  return duration_ms; 
 }

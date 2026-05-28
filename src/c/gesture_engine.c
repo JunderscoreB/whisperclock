@@ -14,13 +14,12 @@ typedef struct {
 
 static CustomAccelData s_gesture_template[MAX_BUFFER_SIZE];
 static int s_recording_index = 0;
-static Window *s_recording_window;
 
-// UI State Variables
-static TextLayer *s_recording_layer;     // Giant center text
-static TextLayer *s_helper_text_layer;   // Smaller bottom text
+static Window *s_recording_window = NULL;
+static TextLayer *s_recording_layer;     
+static TextLayer *s_helper_text_layer;   
 static char s_dynamic_text_buffer[64];
-static char s_helper_text_buffer[64];    // Buffer for "Recording Time X Seconds"
+static char s_helper_text_buffer[64];    
 
 static bool s_is_recording = false; 
 static int s_countdown_ticks = 0;
@@ -28,9 +27,6 @@ static AppTimer *s_ready_timer = NULL;
 static AppTimer *s_countdown_timer = NULL;
 static AppTimer *s_close_timer = NULL;
 
-// -------------------------------------------------------------------------
-// THE MAIN TRIGGER GATEWAY (Quiet Time Logic)
-// -------------------------------------------------------------------------
 void on_gesture_detected() {
   if (s_settings.respect_quiet_time && quiet_time_is_active()) {
     APP_LOG(APP_LOG_LEVEL_INFO, "Gesture triggered, but Quiet Time is ON. Staying silent.");
@@ -42,20 +38,58 @@ void on_gesture_detected() {
   trigger_playback(true); 
 }
 
-// -------------------------------------------------------------------------
-// DEFAULT WRIST FLICK HANDLER
-// -------------------------------------------------------------------------
+static uint32_t s_last_tap_epoch_ms = 0;
+static int s_current_taps = 0;
+
 static void accel_tap_handler(AccelAxisType axis, int32_t direction) {
-  if (!s_is_recording) {
+  if (s_is_recording) return;
+
+  time_t now_s;
+  uint16_t now_ms;
+  time_ms(&now_s, &now_ms);
+  uint32_t now_epoch_ms = (now_s * 1000) + now_ms;
+
+  if (s_settings.trigger_mode == 1) { 
+    if (axis == ACCEL_AXIS_Z || axis == ACCEL_AXIS_X || axis == ACCEL_AXIS_Y) {
+      if (now_epoch_ms - s_last_tap_epoch_ms < 200) return; 
+
+      if (now_epoch_ms - s_last_tap_epoch_ms > 2500) s_current_taps = 1;
+      else s_current_taps++;
+      
+      s_last_tap_epoch_ms = now_epoch_ms;
+      if (s_current_taps >= s_settings.tap_count) {
+        s_current_taps = 0;
+        on_gesture_detected();
+      }
+    }
+  } 
+  else if (s_settings.trigger_mode == 0) { 
     if (axis == ACCEL_AXIS_Y || axis == ACCEL_AXIS_Z) {
+      if (now_epoch_ms - s_last_tap_epoch_ms < 1000) return; 
+      s_last_tap_epoch_ms = now_epoch_ms;
+      on_gesture_detected();
+    }
+  } 
+  else { 
+    if (axis == ACCEL_AXIS_Z || axis == ACCEL_AXIS_X || axis == ACCEL_AXIS_Y) {
+      if (now_epoch_ms - s_last_tap_epoch_ms < 200) return;
+
+      if (now_epoch_ms - s_last_tap_epoch_ms > 2500) s_current_taps = 1;
+      else s_current_taps++;
+      
+      s_last_tap_epoch_ms = now_epoch_ms;
+      if (s_current_taps >= s_settings.tap_count) {
+        s_current_taps = 0;
+        on_gesture_detected();
+      }
+    } else if (axis == ACCEL_AXIS_Y) {
+      if (now_epoch_ms - s_last_tap_epoch_ms < 1000) return;
+      s_last_tap_epoch_ms = now_epoch_ms;
       on_gesture_detected();
     }
   }
 }
 
-// -------------------------------------------------------------------------
-// CUSTOM GESTURE RECORDING LOGIC
-// -------------------------------------------------------------------------
 static void accel_data_handler(AccelData *data, uint32_t num_samples) {
   for (uint32_t i = 0; i < num_samples; i++) {
     if (s_recording_index < s_settings.gesture_buffer_size) {
@@ -78,15 +112,11 @@ static void finish_recording(void *data) {
   s_is_recording = false; 
   persist_write_data(GESTURE_PERSIST_KEY, s_gesture_template, sizeof(s_gesture_template));
   
-  // Phase 3: Saved Screen (Red)
   window_set_background_color(s_recording_window, GColorRed);
-  
   text_layer_set_text(s_recording_layer, "Saved!");
-  // Hide the helper text since the recording is over
   layer_set_hidden(text_layer_get_layer(s_helper_text_layer), true); 
   
   vibes_double_pulse();
-  
   s_close_timer = app_timer_register(2000, delayed_pop_callback, NULL);
 }
 
@@ -96,28 +126,26 @@ static void recording_tick_callback(void *data) {
     return;
   }
 
-  int whole_sec = s_countdown_ticks / 10;
-  int frac_sec = s_countdown_ticks % 10;
-
+  int display_time = (s_countdown_ticks * 40) / 100; 
+  int whole_sec = display_time / 10;
+  int frac_sec = display_time % 10;
+  
   snprintf(s_dynamic_text_buffer, sizeof(s_dynamic_text_buffer), "Recording...\n%d.%d", whole_sec, frac_sec);
   text_layer_set_text(s_recording_layer, s_dynamic_text_buffer);
 
   s_countdown_ticks--;
-  
-  s_countdown_timer = app_timer_register(100, recording_tick_callback, NULL);
+  s_countdown_timer = app_timer_register(40, recording_tick_callback, NULL);
 }
 
 static void start_listening(void *data) {
   s_ready_timer = NULL;
-  
-  // Phase 2: Recording Screen (Green)
   window_set_background_color(s_recording_window, GColorKellyGreen);
   
   s_recording_index = 0;
   vibes_short_pulse(); 
   
   accel_data_service_subscribe(1, accel_data_handler);
-  accel_service_set_sampling_rate(ACCEL_SAMPLING_10HZ);
+  accel_service_set_sampling_rate(ACCEL_SAMPLING_25HZ);
 
   s_countdown_ticks = s_settings.gesture_buffer_size;
   recording_tick_callback(NULL);
@@ -127,47 +155,65 @@ static void cancel_recording_handler(ClickRecognizerRef recognizer, void *contex
   window_stack_pop(true);
 }
 
+#ifdef PBL_TOUCH
+// 🟢 NEW: Added a Touch Handler for the recording screen so you can tap to cancel!
+static void recording_touch_handler(const TouchEvent *event, void *context) {
+  if (event->type == TouchEvent_Touchdown) {
+    cancel_recording_handler(NULL, NULL);
+  }
+}
+#endif
+
 static void recording_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_UP, cancel_recording_handler);
   window_single_click_subscribe(BUTTON_ID_DOWN, cancel_recording_handler);
   window_single_click_subscribe(BUTTON_ID_SELECT, cancel_recording_handler);
 }
 
-static void window_load(Window *window) {
+static void recording_window_load(Window *window) {
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
 
-  // Phase 1: Get Ready Screen (Amber)
   window_set_background_color(window, GColorOrange);
 
-  // --- Giant Center Text ---
   s_recording_layer = text_layer_create(GRect(0, (bounds.size.h / 2) - 40, bounds.size.w, 100));
   text_layer_set_background_color(s_recording_layer, GColorClear);
   text_layer_set_text_color(s_recording_layer, GColorWhite);
   text_layer_set_text_alignment(s_recording_layer, GTextAlignmentCenter);
   text_layer_set_font(s_recording_layer, fonts_get_system_font(FONT_KEY_GOTHIC_28_BOLD));
-  
   text_layer_set_text(s_recording_layer, "Get Ready...");
   layer_add_child(window_layer, text_layer_get_layer(s_recording_layer));
 
-  // --- Smaller Helper Text (Bottom) ---
-  int whole_sec = s_settings.gesture_buffer_size / 10;
-  int frac_sec = s_settings.gesture_buffer_size % 10;
-  snprintf(s_helper_text_buffer, sizeof(s_helper_text_buffer), "Recording Time %d.%d sec\n\n(Press any button to cancel)", whole_sec, frac_sec);
+  int display_time = (s_settings.gesture_buffer_size * 40) / 100;
+  int whole_sec = display_time / 10;
+  int frac_sec = display_time % 10;
+  snprintf(s_helper_text_buffer, sizeof(s_helper_text_buffer), "Recording Time %d.%d sec\n\n(Tap Screen to cancel)", whole_sec, frac_sec);
 
   s_helper_text_layer = text_layer_create(GRect(0, bounds.size.h - 55, bounds.size.w, 60));
   text_layer_set_background_color(s_helper_text_layer, GColorClear);
   text_layer_set_text_color(s_helper_text_layer, GColorWhite);
   text_layer_set_text_alignment(s_helper_text_layer, GTextAlignmentCenter);
   text_layer_set_font(s_helper_text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_14));
-  
   text_layer_set_text(s_helper_text_layer, s_helper_text_buffer);
   layer_add_child(window_layer, text_layer_get_layer(s_helper_text_layer));
 
   s_ready_timer = app_timer_register(3000, start_listening, NULL);
 }
 
-static void window_unload(Window *window) {
+// 🟢 NEW: Subscribing to touch events during the recording process
+static void recording_window_appear(Window *window) {
+#ifdef PBL_TOUCH
+  if (touch_service_is_enabled()) touch_service_subscribe(recording_touch_handler, NULL);
+#endif
+}
+
+static void recording_window_disappear(Window *window) {
+#ifdef PBL_TOUCH
+  touch_service_unsubscribe();
+#endif
+}
+
+static void recording_window_unload(Window *window) {
   if (s_ready_timer) app_timer_cancel(s_ready_timer);
   if (s_countdown_timer) app_timer_cancel(s_countdown_timer);
   if (s_close_timer) app_timer_cancel(s_close_timer);
@@ -177,30 +223,33 @@ static void window_unload(Window *window) {
     s_is_recording = false;
   }
 
-  text_layer_destroy(s_recording_layer);
-  text_layer_destroy(s_helper_text_layer);
+  if (s_recording_layer) text_layer_destroy(s_recording_layer);
+  if (s_helper_text_layer) text_layer_destroy(s_helper_text_layer);
 }
 
 void gesture_start_recording() {
+  if (!s_recording_window) {
+    s_recording_window = window_create();
+    window_set_click_config_provider(s_recording_window, recording_click_config_provider);
+    window_set_window_handlers(s_recording_window, (WindowHandlers) {
+      .load = recording_window_load,
+      .appear = recording_window_appear,
+      .disappear = recording_window_disappear,
+      .unload = recording_window_unload,
+    });
+  }
   s_is_recording = true; 
-  s_recording_window = window_create();
-  
-  window_set_click_config_provider(s_recording_window, recording_click_config_provider);
-  
-  window_set_window_handlers(s_recording_window, (WindowHandlers) {
-    .load = window_load,
-    .unload = window_unload,
-  });
   window_stack_push(s_recording_window, true);
 }
 
-// -------------------------------------------------------------------------
-// BACKGROUND LIFECYCLE
-// -------------------------------------------------------------------------
 void gesture_engine_init() {
   accel_tap_service_subscribe(accel_tap_handler);
 }
 
 void gesture_engine_deinit() {
   accel_tap_service_unsubscribe();
+  if (s_recording_window) {
+    window_destroy(s_recording_window);
+    s_recording_window = NULL;
+  }
 }
