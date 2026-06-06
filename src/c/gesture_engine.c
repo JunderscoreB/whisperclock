@@ -24,12 +24,12 @@ static CustomAccelData s_gesture_template[MAX_BUFFER_SIZE];
 static int s_recording_index = 0;
 
 static Window *s_recording_window = NULL;
-static TextLayer *s_recording_layer;     
-static TextLayer *s_helper_text_layer;   
+static TextLayer *s_recording_layer;
+static TextLayer *s_helper_text_layer;
 static char s_dynamic_text_buffer[64];
-static char s_helper_text_buffer[64];    
+static char s_helper_text_buffer[64];
 
-static bool s_is_recording = false; 
+static bool s_is_recording = false;
 static int s_countdown_ticks = 0;
 static AppTimer *s_ready_timer = NULL;
 static AppTimer *s_countdown_timer = NULL;
@@ -38,19 +38,19 @@ static AppTimer *s_close_timer = NULL;
 void on_gesture_detected() {
   if (s_settings.respect_quiet_time && quiet_time_is_active()) {
     APP_LOG(APP_LOG_LEVEL_INFO, "Gesture triggered, but Quiet Time is ON. Staying silent.");
-    return; 
+    return;
   }
 
   APP_LOG(APP_LOG_LEVEL_INFO, "Gesture triggered! Speaking the time.");
   show_speaking_graphic();
-  trigger_playback(true); 
+  trigger_playback(true);
 }
 
 static uint32_t s_last_tap_epoch_ms = 0;
 static int s_current_taps = 0;
 
 /**
- * @brief Foreground fallback tap handler, used primarily when testing 
+ * @brief Foreground fallback tap handler, used primarily when testing
  * gesture configurations inside the app. Background processing handled by worker.
  */
 static void accel_tap_handler(AccelAxisType axis, int32_t direction) {
@@ -61,34 +61,34 @@ static void accel_tap_handler(AccelAxisType axis, int32_t direction) {
   time_ms(&now_s, &now_ms);
   uint32_t now_epoch_ms = (now_s * 1000) + now_ms;
 
-  if (s_settings.trigger_mode == 1) { 
+  if (s_settings.trigger_mode == 1) {
     if (axis == ACCEL_AXIS_Z || axis == ACCEL_AXIS_X || axis == ACCEL_AXIS_Y) {
-      if (now_epoch_ms - s_last_tap_epoch_ms < 200) return; 
+      if (now_epoch_ms - s_last_tap_epoch_ms < 200) return;
 
       if (now_epoch_ms - s_last_tap_epoch_ms > 2500) s_current_taps = 1;
       else s_current_taps++;
-      
+
       s_last_tap_epoch_ms = now_epoch_ms;
       if (s_current_taps >= s_settings.tap_count) {
         s_current_taps = 0;
         on_gesture_detected();
       }
     }
-  } 
-  else if (s_settings.trigger_mode == 0) { 
+  }
+  else if (s_settings.trigger_mode == 0) {
     if (axis == ACCEL_AXIS_Y || axis == ACCEL_AXIS_Z) {
-      if (now_epoch_ms - s_last_tap_epoch_ms < 1000) return; 
+      if (now_epoch_ms - s_last_tap_epoch_ms < 1000) return;
       s_last_tap_epoch_ms = now_epoch_ms;
       on_gesture_detected();
     }
-  } 
-  else { 
+  }
+  else {
     if (axis == ACCEL_AXIS_Z || axis == ACCEL_AXIS_X || axis == ACCEL_AXIS_Y) {
       if (now_epoch_ms - s_last_tap_epoch_ms < 200) return;
 
       if (now_epoch_ms - s_last_tap_epoch_ms > 2500) s_current_taps = 1;
       else s_current_taps++;
-      
+
       s_last_tap_epoch_ms = now_epoch_ms;
       if (s_current_taps >= s_settings.tap_count) {
         s_current_taps = 0;
@@ -121,15 +121,15 @@ static void delayed_pop_callback(void *data) {
 static void finish_recording(void *data) {
   s_countdown_timer = NULL;
   accel_data_service_unsubscribe();
-  s_is_recording = false; 
-  
+  s_is_recording = false;
+
   // Write the recorded spatial template array to persistence for the DTW worker
   persist_write_data(GESTURE_PERSIST_KEY, s_gesture_template, sizeof(s_gesture_template));
-  
+
   window_set_background_color(s_recording_window, GColorRed);
   text_layer_set_text(s_recording_layer, "Saved!");
-  layer_set_hidden(text_layer_get_layer(s_helper_text_layer), true); 
-  
+  layer_set_hidden(text_layer_get_layer(s_helper_text_layer), true);
+
   vibes_double_pulse();
   s_close_timer = app_timer_register(2000, delayed_pop_callback, NULL);
 }
@@ -140,10 +140,10 @@ static void recording_tick_callback(void *data) {
     return;
   }
 
-  int display_time = (s_countdown_ticks * 40) / 100; 
+  int display_time = (s_countdown_ticks * 40) / 100;
   int whole_sec = display_time / 10;
   int frac_sec = display_time % 10;
-  
+
   snprintf(s_dynamic_text_buffer, sizeof(s_dynamic_text_buffer), "Recording...\n%d.%d", whole_sec, frac_sec);
   text_layer_set_text(s_recording_layer, s_dynamic_text_buffer);
 
@@ -154,10 +154,10 @@ static void recording_tick_callback(void *data) {
 static void start_listening(void *data) {
   s_ready_timer = NULL;
   window_set_background_color(s_recording_window, GColorKellyGreen);
-  
+
   s_recording_index = 0;
-  vibes_short_pulse(); 
-  
+  vibes_short_pulse();
+
   accel_data_service_subscribe(1, accel_data_handler);
   accel_service_set_sampling_rate(ACCEL_SAMPLING_25HZ);
 
@@ -214,15 +214,15 @@ static void recording_window_load(Window *window) {
 }
 
 static void recording_window_appear(Window *window) {
-#ifdef PBL_TOUCH
+  #ifdef PBL_TOUCH
   if (touch_service_is_enabled()) touch_service_subscribe(recording_touch_handler, NULL);
-#endif
+  #endif
 }
 
 static void recording_window_disappear(Window *window) {
-#ifdef PBL_TOUCH
+  #ifdef PBL_TOUCH
   touch_service_unsubscribe();
-#endif
+  #endif
 }
 
 static void recording_window_unload(Window *window) {
@@ -250,7 +250,7 @@ void gesture_start_recording() {
       .unload = recording_window_unload,
     });
   }
-  s_is_recording = true; 
+  s_is_recording = true;
   window_stack_push(s_recording_window, true);
 }
 

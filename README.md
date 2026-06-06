@@ -8,7 +8,8 @@ Designed for maximum reliability and efficiency, WhisperClock completely bypasse
 
 * ⚡ **Instant Quick Launch:** Integrates directly with PebbleOS Quick Launch. Hold a single button from your watchface to instantly hear the time without navigating menus.
 * 🔋 **Zero Background Battery Drain:** By utilizing hardware button interrupts instead of background accelerometer polling, the app CPU sleeps 100% of the time until triggered.
-* 🔊 **16-Bit Audio Engine:** Features real-time audio upsampling and a custom active-silence drip feed to protect the hardware DAC and ensure crystal-clear audio playback.
+* 🔊 **Native 16-Bit Audio Engine:** Features real-time decoding of Signed 16-bit 16kHz PCM audio and a custom active-silence drip feed to protect the hardware DAC and ensure crystal-clear, zero-hiss playback.
+* 🗣️ **Dynamic Prosody Engine:** Implements human-like speech pacing with dynamic playback modifiers, contextual pausing, and aggressive syllable compression for fluid, natural-sounding time announcements.
 
 ## 🛠️ How to Use
 
@@ -19,9 +20,9 @@ To get the true WhisperClock experience, map it to a physical hardware button:
 3. Scroll through your app list and select **WhisperClock**.
 
 ### 2. General Operation
-* **Trigger the App:** From your watchface, press and hold your assigned Quick Launch button. 
+* **Trigger the App:** From your watchface, press and hold your assigned Quick Launch button.
 * **Listen:** Hold the watch to your ear. The app will immediately speak the time and automatically close itself when finished.
-* **Cancel:** Press **any** physical button on the watch or tap the screen to instantly kill the audio and close the app.
+* **Cancel & Settings:** Press the **Up** button while the watch is speaking to instantly halt the audio and launch the Settings menu. Press the **Select**, **Down**, or **Back** buttons to simply cancel playback and close the app.
 
 ---
 
@@ -37,7 +38,7 @@ Launch WhisperClock normally from your Pebble's main app menu to configure your 
 
 ---
 
-## 🧪 The Beta Physics Engine (Gestures & Tapping) -- Under active development, use at your own risk!
+## 🧪 The Beta Physics Engine (Gestures & Tapping)
 
 Want a truly hands-free experience? WhisperClock contains a hidden background physics engine that allows you to trigger the time using arm movements or physical taps.
 
@@ -63,11 +64,11 @@ WhisperClock is built to be a modern, highly optimized Pebble app that takes ful
 
 ## 🌍 Future Plans: Localization & Community Voices
 
-WhisperClock currently only ships with an **English** voice pack. However, the audio engine is designed to be highly modular. 
+WhisperClock currently only ships with an **English** voice pack. However, the audio engine is designed to be highly modular.
 
 **Call for Contributors!**
-We want to bring WhisperClock to Spanish, French, German, Japanese, and more. If you have a decent microphone and want to contribute a voice pack for your native language, we need you! 
-You only need to record a few dozen short, individual `.wav` files (e.g., numbers 1-20, 30, 40, 50, and basic prefixes). 
+We want to bring WhisperClock to Spanish, French, German, Japanese, and more. If you have a decent microphone and want to contribute a voice pack for your native language, we need you!
+You only need to record a few dozen short, individual `.wav` files (e.g., numbers 1-20, 30, 40, 50, and basic prefixes).
 
 If you are interested in translating the app and recording a voice pack, please open an Issue or submit a Pull Request!
 
@@ -104,4 +105,4 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ## 🤖 AI Disclosure
-Parts of the codebase, specifically the 16-bit audio upsampling algorithms, accelerometer physics engine, and dynamic UI toggles, were generated and optimized with the assistance of generative AI (Google Gemini).
+Parts of the codebase, specifically the native 16-bit audio parsing, dynamic speech prosody, accelerometer physics engine, and dynamic UI toggles, were generated and optimized with the assistance of generative AI (Google Gemini).

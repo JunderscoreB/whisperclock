@@ -22,23 +22,23 @@ static void init(void) {
 
   // Route application flow based on system launch trigger
   if (reason == APP_LAUNCH_QUICK_LAUNCH) {
-      APP_LOG(APP_LOG_LEVEL_INFO, "App Woken by: QUICK LAUNCH BUTTON");
-      show_speaking_graphic();
-      trigger_playback(true); 
-  } 
+    APP_LOG(APP_LOG_LEVEL_INFO, "App Woken by: QUICK LAUNCH BUTTON");
+    show_speaking_graphic();
+    trigger_playback(true);
+  }
   else if (persist_exists(WAKE_REASON_PERSIST_KEY)) {
-      uint8_t wake_reason = 0;
-      persist_read_data(WAKE_REASON_PERSIST_KEY, &wake_reason, sizeof(wake_reason));
-      persist_delete(WAKE_REASON_PERSIST_KEY); 
-      
-      APP_LOG(APP_LOG_LEVEL_INFO, "App Woken by: WORKER (Reason: %d)", wake_reason);
-      show_speaking_graphic();
-      trigger_playback(true); 
+    uint8_t wake_reason = 0;
+    persist_read_data(WAKE_REASON_PERSIST_KEY, &wake_reason, sizeof(wake_reason));
+    persist_delete(WAKE_REASON_PERSIST_KEY);
+
+    APP_LOG(APP_LOG_LEVEL_INFO, "App Woken by: WORKER (Reason: %d)", wake_reason);
+    show_speaking_graphic();
+    trigger_playback(true);
   }
   else {
-      // Standard Launch: Enter settings menu
-      APP_LOG(APP_LOG_LEVEL_INFO, "App Woken by: SYSTEM MENU");
-      settings_window_push();
+    // Standard Launch: Enter settings menu
+    APP_LOG(APP_LOG_LEVEL_INFO, "App Woken by: SYSTEM MENU");
+    settings_window_push();
   }
 }
 

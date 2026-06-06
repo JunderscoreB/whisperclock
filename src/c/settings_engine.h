@@ -4,9 +4,9 @@
  *
  * Released under the MIT License.
  *
- * AI Disclosure: Portions of this file, including system architecture, 
- * audio upsampling algorithms, and preprocessor UI toggles, were 
- * generated and optimized with the assistance of generative AI 
+ * AI Disclosure: Portions of this file, including system architecture,
+ * audio upsampling algorithms, and preprocessor UI toggles, were
+ * generated and optimized with the assistance of generative AI
  * (Google Gemini).
  */
 
@@ -18,7 +18,7 @@
 /**
  * @struct WhisperSettings
  * @brief Core configuration structure for the WhisperClock app.
- * @note This struct is packed to ensure a consistent memory footprint 
+ * @note This struct is packed to ensure a consistent memory footprint
  * across the foreground app and the background worker.
  */
 typedef struct __attribute__((__packed__)) {

@@ -15,6 +15,8 @@
 typedef struct {
   char filename[16];
   char display_text[16];
+  int16_t delay_mod; // Additional ms delay after this clip plays
+  int16_t trim_mod;  // Additional ms trim to cut the end of this clip early
 } AudioQueueItem;
 
 void generate_audio_playlist(void);
