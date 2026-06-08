@@ -61,8 +61,22 @@ void generate_audio_playlist() {
   else if (s_settings.clock_mode == 2) is_military = true;
   else is_military = clock_is_24h_style();
 
-  if (s_settings.say_its) {
+  // Handle the new 3-way prefix mode logic
+  if (s_settings.prefix_mode == 1) {
     queue_audio_ext("its.wav", "It's", -s_settings.playback_speed / 2, 40);
+  } else if (s_settings.prefix_mode == 2) {
+    queue_audio_ext("the-time-is.wav", "The time is", -s_settings.playback_speed / 2, 40);
+  }
+
+  int16_t hour_delay = 40;
+
+  // --- NEW: Custom Noon/Midnight Handling for 12-Hour Mode ---
+  if (!is_military && min == 0 && hour == 0) {
+    queue_audio_ext("midnight.wav", "Midnight", hour_delay, 0);
+    return; // Skip AM/PM suffix entirely
+  } else if (!is_military && min == 0 && hour == 12) {
+    queue_audio_ext("noon.wav", "Noon", hour_delay, 0);
+    return; // Skip AM/PM suffix entirely
   }
 
   int display_hour = hour;
@@ -71,11 +85,15 @@ void generate_audio_playlist() {
     if (display_hour == 0) display_hour = 12;
   }
 
-  int16_t hour_delay = 40;
-
+  // --- FIXED: Military Time Hour Parsing ---
   if (is_military && hour == 0) {
     queue_audio_ext("zero.wav", "Zero", -s_settings.playback_speed / 2, 60);
-    queue_audio_ext("hundred.wav", "Hundred", hour_delay, 0);
+    if (min == 0) {
+      queue_audio_ext("hundred.wav", "Hundred", hour_delay, 0);
+    } else {
+      // e.g. 00:15 becomes "Zero Zero Fifteen"
+      queue_audio_ext("zero.wav", "Zero", hour_delay, 0);
+    }
   } else if (is_military && hour < 10) {
     queue_audio_ext("zero.wav", "Zero", -s_settings.playback_speed / 2, 60);
     queue_number_ext(hour, hour_delay, 0);
@@ -90,8 +108,14 @@ void generate_audio_playlist() {
     queue_number_ext(display_hour, hour_delay, 0);
   }
 
+  // --- FIXED: Military Time Minute Parsing ---
   if (min == 0) {
-    if (is_military) queue_audio("hundred.wav", "Hundred");
+    if (is_military) {
+      // Prevent "Zero hundred hundred" by only saying hundred if hour != 0
+      if (hour != 0) {
+        queue_audio("hundred.wav", "Hundred");
+      }
+    }
     else queue_audio("oclock.wav", "O'clock");
   } else if (min < 10) {
     if (is_military) {

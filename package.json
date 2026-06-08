@@ -10,7 +10,9 @@
         "projectType": "native",
         "resources": {
             "media": [
+                {"file": "data/gear_icon.png", "name": "IMAGE_SETTINGS_GEAR", "targetPlatforms": null, "type": "bitmap"},
                 {"file": "data/its.wav", "name": "its", "targetPlatforms": null, "type": "raw"},
+                {"file": "data/the-time-is.wav", "name": "the_time_is", "targetPlatforms": null, "type": "raw"},
                 {"file": "data/am.wav", "name": "am", "targetPlatforms": null, "type": "raw"},
                 {"file": "data/pm.wav", "name": "pm", "targetPlatforms": null, "type": "raw"},
                 {"file": "data/oclock.wav", "name": "oclock", "targetPlatforms": null, "type": "raw"},
@@ -52,11 +54,11 @@
         "uuid": "1d051e35-b3ae-446d-81c6-99e8d1a8be6c",
         "capabilities": [
             "speaker",
-	    "touch"
+            "touch"
         ],
         "watchapp": {
             "watchface": false
         }
     },
-    "version": "1.0.0"
+    "version": "1.1.0"
 }

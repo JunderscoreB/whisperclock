@@ -22,7 +22,7 @@
  * across the foreground app and the background worker.
  */
 typedef struct __attribute__((__packed__)) {
-  bool say_its;                 // Prefix the time with "It's"
+  uint8_t prefix_mode;          // 0: None, 1: "It's", 2: "The time is..."
   bool say_ampm;                // Suffix the time with AM/PM
   int16_t playback_speed;       // Delay in ms between words
   int16_t gesture_buffer_size;  // Size of the DTW gesture recording window
