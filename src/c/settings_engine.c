@@ -387,15 +387,26 @@ static void build_menu_items() {
   if (s_settings.clock_mode == 1) clock_text = "Force 12-Hour";
   if (s_settings.clock_mode == 2) clock_text = "Force 24-Hour";
 
+  char *prefix_text = "None";
+  if (s_settings.prefix_mode == 1) prefix_text = "It's...";
+  else if (s_settings.prefix_mode == 2) prefix_text = "The time is...";
+
   int i = 0;
+
+  s_menu_items[i++] = (SimpleMenuItem) { .title = "Clock Mode", .subtitle = clock_text, .callback = toggle_clock_mode_callback };
+  s_menu_items[i++] = (SimpleMenuItem) { .title = "Time Prefix", .subtitle = prefix_text, .callback = toggle_prefix_callback };
+  s_menu_items[i++] = (SimpleMenuItem) { .title = "Speak AM/PM", .subtitle = s_settings.say_ampm ? "Enabled" : "Disabled", .callback = toggle_ampm_callback };
+  s_menu_items[i++] = (SimpleMenuItem) { .title = "Speaker Volume", .subtitle = s_volume_text, .callback = change_volume_callback };
+  s_menu_items[i++] = (SimpleMenuItem) { .title = "Voice Interval", .subtitle = s_speed_text, .callback = change_speed_callback };
+  s_menu_items[i++] = (SimpleMenuItem) { .title = "Audio Trim", .subtitle = s_trim_text, .callback = change_trim_callback };
+  s_menu_items[i++] = (SimpleMenuItem) { .title = "Test Audio", .subtitle = "Preview time speaking", .callback = test_audio_callback };
+  s_menu_items[i++] = (SimpleMenuItem) { .title = "About / Help", .subtitle = "Instructions & Info", .callback = show_about_callback };
 
   s_menu_items[i++] = (SimpleMenuItem) {
     .title = "Beta Features",
     .subtitle = s_settings.enable_beta_features ? "ON: Gestures & Tapping" : "OFF: Quick Launch Only",
     .callback = toggle_beta_callback
   };
-
-  s_menu_items[i++] = (SimpleMenuItem) { .title = "Clock Mode", .subtitle = clock_text, .callback = toggle_clock_mode_callback };
 
   if (s_settings.enable_beta_features) {
     char *trigger_text = "Gesture Sweep";
@@ -422,18 +433,6 @@ static void build_menu_items() {
     s_menu_items[i++] = (SimpleMenuItem) { .title = "Clear Gesture", .subtitle = clear_text, .callback = clear_gesture_callback };
     s_menu_items[i++] = (SimpleMenuItem) { .title = "Recording Time", .subtitle = time_text, .callback = change_record_time_callback };
   }
-
-  char *prefix_text = "None";
-  if (s_settings.prefix_mode == 1) prefix_text = "It's";
-  else if (s_settings.prefix_mode == 2) prefix_text = "The time is...";
-
-  s_menu_items[i++] = (SimpleMenuItem) { .title = "Time Prefix", .subtitle = prefix_text, .callback = toggle_prefix_callback };
-  s_menu_items[i++] = (SimpleMenuItem) { .title = "Speak AM/PM", .subtitle = s_settings.say_ampm ? "Enabled" : "Disabled", .callback = toggle_ampm_callback };
-  s_menu_items[i++] = (SimpleMenuItem) { .title = "Speaker Volume", .subtitle = s_volume_text, .callback = change_volume_callback };
-  s_menu_items[i++] = (SimpleMenuItem) { .title = "Voice Interval", .subtitle = s_speed_text, .callback = change_speed_callback };
-  s_menu_items[i++] = (SimpleMenuItem) { .title = "Audio Trim", .subtitle = s_trim_text, .callback = change_trim_callback };
-  s_menu_items[i++] = (SimpleMenuItem) { .title = "Test Audio", .subtitle = "Preview time speaking", .callback = test_audio_callback };
-  s_menu_items[i++] = (SimpleMenuItem) { .title = "About / Help", .subtitle = "Instructions & Info", .callback = show_about_callback };
 
   s_menu_sections[0].title = "WhisperClock Settings";
   s_menu_sections[0].num_items = i;
