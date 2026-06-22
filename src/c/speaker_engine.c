@@ -99,6 +99,8 @@ static uint32_t get_resource_id_for_filename(const char* filename) {
     if (first == 'p') {
         if (strcmp(filename, "pm.wav") == 0) return RESOURCE_ID_pm;
         if (strcmp(filename, "past.wav") == 0) return RESOURCE_ID_past;
+        // THE FIX: ADD PRECISELY TO THE DICTIONARY
+        if (strcmp(filename, "precisely.wav") == 0) return RESOURCE_ID_precisely;
     }
     if (first == 'q' && strcmp(filename, "quarter.wav") == 0) return RESOURCE_ID_quarter;
     if (first == 's') {
