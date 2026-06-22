@@ -3,48 +3,73 @@
  * Copyright (c) 2026 J_B
  *
  * Released under the MIT License.
- *
- * AI Disclosure: Portions of this file, including system architecture,
- * audio upsampling algorithms, and preprocessor UI toggles, were
- * generated and optimized with the assistance of generative AI
- * (Google Gemini).
  */
 
 #pragma once
 #include <pebble.h>
 
-#define SETTINGS_PERSIST_KEY 3
+#define SETTINGS_PERSIST_KEY 13
 
-/**
- * @struct WhisperSettings
- * @brief Core configuration structure for the WhisperClock app.
- * @note This struct is packed to ensure a consistent memory footprint
- * across the foreground app and the background worker.
- */
+// Prefix Enums
+#define PREFIX_NONE 0
+#define PREFIX_ITS 1
+#define PREFIX_THE_TIME_IS 2
+
+// Mode Enums
+#define MODE_12H_DIGITAL 0
+#define MODE_24H_MILITARY 1
+#define MODE_24H_CIVILIAN 2
+#define MODE_COLLOQUIAL 3
+#define MODE_TELECOM 4
+#define MODE_FUZZY 5
+#define MODE_SYSTEM_DEFAULT 6
+
 typedef struct __attribute__((__packed__)) {
-  uint8_t prefix_mode;          // 0: None, 1: "It's", 2: "The time is..."
-  bool say_ampm;                // Suffix the time with AM/PM
-  int16_t playback_speed;       // Delay in ms between words
-  int16_t gesture_buffer_size;  // Size of the DTW gesture recording window
-  uint8_t clock_mode;           // 0: Auto, 1: 12-hour, 2: 24-hour
-  uint8_t volume;               // Software volume multiplier (1-100)
-  int16_t clip_trim;            // Milliseconds to trim from the end of audio files
-  bool respect_quiet_time;      // Disable triggers during quiet hours
-  uint8_t trigger_mode;         // 0: Gesture, 1: Tap, 2: Both
-  uint8_t tap_count;            // Number of taps required to trigger
-  uint8_t quiet_start_hour;     // Start hour for quiet time (24h format)
-  uint8_t quiet_end_hour;       // End hour for quiet time (24h format)
-  bool enable_beta_features;    // Toggle background worker physics
+  uint8_t prefix_mode;
+  bool say_ampm;
+  bool is_us_dialect;
+  int16_t playback_speed;
+  uint8_t clock_mode;
+  uint8_t volume;
+  int16_t clip_trim;
+
+  bool enable_beta_features;
+
+  // Background Worker & Scheduling
+  bool respect_quiet_time;
+  uint8_t quiet_start_hour;
+  uint8_t quiet_end_hour;
+  uint8_t night_volume;
+  bool night_worker_sleep;
+
+  // Gesture Configuration
+  uint8_t gesture_mode; // 0 = Default Flick, 1 = Tap Glass, 2 = Custom Axes
+  uint8_t default_flick_sensitivity; // Range: 55 to 70
+  uint8_t tap_sensitivity;           // Range: 0 to 30 (Mapped to 40-70% physics)
+
+  // Physics & Gestures (Fully Isolated Axes)
+  int16_t x_multiplier;
+  int16_t y_multiplier;
+  int16_t z_multiplier;
+  int16_t gesture_buffer_size;
+
+  // FUZZY TUNER
+  int16_t prefix_gap;
+  int16_t prefix_trim;
+  int16_t fuzzy_mod_gap;
+  int16_t fuzzy_conv_gap;
+  int16_t fuzzy_past_gap;
+  int16_t fuzzy_to_gap;
+  int16_t fuzzy_tight_gap;
+  int16_t fuzzy_ampm_gap;
 } WhisperSettings;
 
-// Globally exposed settings instance
-extern WhisperSettings s_settings;
-
-// Window lifecycle management
+// --- Core Application Logic Exports ---
 void settings_init(void);
-void settings_window_push(void);
 void settings_deinit(void);
+void settings_window_push(void);
+uint8_t get_current_active_volume(void);
 
-// Speaking UI Graphic Hooks
+// --- Speaking UI Overlay Exports ---
 void show_speaking_graphic(void);
 void hide_speaking_graphic(void);

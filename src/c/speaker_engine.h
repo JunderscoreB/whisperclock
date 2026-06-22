@@ -2,6 +2,8 @@
  * WhisperClock - Speaker Engine Header
  * Copyright (c) 2026 J_B
  *
+ * Portions of this project's v1.2 audio engine logic and settings configuration were generated and refactored with the assistance of a large language model (Gemini).
+ *
  * Released under the MIT License.
  */
 

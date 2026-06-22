@@ -63,7 +63,7 @@
                 {"file": "data/seconds.wav", "name": "seconds", "targetPlatforms": null, "type": "raw"},
                 {"file": "data/almost.wav", "name": "almost", "targetPlatforms": null, "type": "raw"},
                 {"file": "data/just_after.wav", "name": "just_after", "targetPlatforms": null, "type": "raw"},
-                {"file": "data/beep.wav", "name": "beep", "targetPlatforms": null, "type": "raw"},
+                {"file": "data/beep.wav", "name": "beep", "targetPlatforms": null, "type": "raw"}
                 {"file": "data/precisely.wav", "name": "precisely", "targetPlatforms": null, "type": "raw"}
             ]
         },

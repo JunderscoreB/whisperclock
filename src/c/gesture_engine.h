@@ -11,3 +11,7 @@
 void gesture_engine_init(void);
 void gesture_engine_deinit(void);
 void gesture_start_recording(void);
+
+// Safety switches to prevent the watch from triggering itself while speaking
+void gesture_engine_pause(void);
+void gesture_engine_resume(void);
