@@ -4,8 +4,8 @@
  * 1. BACKLIGHT SUPPRESSION: Pushing 16-bit audio draws massive current. To prevent
  * hardware brownouts/crashes, `light_enable(false);` MUST be called before playback
  * begins and inside the play_next_word loop to keep the screen dark.
- * 2. LATENCY PRE-FIRE (75ms): The Pebble has a ~75ms file-loading latency. The playback
- * timer MUST always subtract `latency_compensation` (75ms) so the watch begins
+ * 2. LATENCY PRE-FIRE (30ms): The Pebble has a ~30ms file-loading latency. The playback
+ * timer MUST always subtract `latency_compensation` (30ms) so the watch begins
  * loading the next audio buffer before the current one finishes.
  * 3. PLOSIVE BREATHING: The "PM" audio clip requires a split-second of silence before
  * it so the 'P' sound (a plosive) doesn't get swallowed by the preceding vowel.
@@ -66,9 +66,9 @@ static void queue_audio_ext(const char* filename, const char* display_text, int1
   }
 }
 
-// Standard modes now respect the user's global Voice Interval slider perfectly
+// Trims and delays zeroed out for tighter custom voice clips
 static void queue_audio(const char* filename, const char* display_text) {
-  queue_audio_ext(filename, display_text, -20, 20);
+  queue_audio_ext(filename, display_text, 0, 0);
 }
 
 static void queue_number_ext(int number, int16_t delay_mod, int16_t trim_mod) {
@@ -86,8 +86,7 @@ static void queue_complex_number(int num, int16_t delay, int16_t trim) {
     int tens = (num / 10) * 10;
     int ones = num % 10;
     if (ones > 0) {
-      // Heavily squeeze the "tens" and "ones" together (e.g. Forty-Five). This remains locked.
-      queue_number_ext(tens, -s_settings.playback_speed - 40, 60);
+      queue_number_ext(tens, -s_settings.playback_speed, 0);
       queue_number_ext(ones, delay, trim);
     } else {
       queue_number_ext(tens, delay, trim);
@@ -97,26 +96,24 @@ static void queue_complex_number(int num, int16_t delay, int16_t trim) {
 
 static void append_prefix(uint8_t prefix) {
   if (prefix == PREFIX_ITS) {
-    queue_audio_ext("its.wav", "It's", s_settings.prefix_gap, s_settings.prefix_trim);
+    queue_audio_ext("its.wav", "It's", s_settings.prefix_gap, 0);
   } else if (prefix == PREFIX_THE_TIME_IS) {
-    queue_audio_ext("the-time-is.wav", "The time is", s_settings.prefix_gap + 20, s_settings.prefix_trim);
+    queue_audio_ext("the-time-is.wav", "The time is", s_settings.prefix_gap, 0); // Trim forced to 0
   }
 }
 
 static void build_12h_digital(uint8_t h, uint8_t m, bool use_ampm) {
-  int16_t std_delay = -20;
+  int16_t std_delay = 0;
 
   // Plosive glide lock: Always attaches to the previous word regardless of global speed
   int16_t ampm_delay = -s_settings.playback_speed + 25;
   int16_t ampm_trim = 0;
 
   if (m == 0 && h == 0) {
-    // FIX: Suppress AM fallback for Midnight
     queue_audio_ext("midnight.wav", "Midnight", 0, 0);
     return;
   }
   if (m == 0 && h == 12) {
-    // FIX: Suppress PM fallback for Noon
     queue_audio_ext("noon.wav", "Noon", 0, 0);
     return;
   }
@@ -124,15 +121,15 @@ static void build_12h_digital(uint8_t h, uint8_t m, bool use_ampm) {
   uint8_t display_h = h % 12;
   if (display_h == 0) display_h = 12;
 
-  queue_number_ext(display_h, m == 0 ? std_delay : std_delay, 20);
+  queue_number_ext(display_h, m == 0 ? std_delay : std_delay, 0);
 
   if (m == 0) {
     queue_audio_ext("oclock.wav", "O'clock", use_ampm ? ampm_delay : 0, ampm_trim);
   } else if (m < 10) {
-    queue_audio_ext("oh.wav", "Oh", std_delay, 60);
-    queue_number_ext(m, use_ampm ? ampm_delay : std_delay, use_ampm ? ampm_trim : 20);
+    queue_audio_ext("oh.wav", "Oh", std_delay, 0);
+    queue_number_ext(m, use_ampm ? ampm_delay : std_delay, use_ampm ? ampm_trim : 0);
   } else {
-    queue_complex_number(m, use_ampm ? ampm_delay : std_delay, use_ampm ? ampm_trim : 20);
+    queue_complex_number(m, use_ampm ? ampm_delay : std_delay, use_ampm ? ampm_trim : 0);
   }
 
   if (use_ampm) {
@@ -141,56 +138,55 @@ static void build_12h_digital(uint8_t h, uint8_t m, bool use_ampm) {
 }
 
 static void build_24h_military(uint8_t h, uint8_t m, bool say_hours) {
-  int16_t std_delay = -20;
+  int16_t std_delay = 0;
 
   if (h < 10) {
-    queue_audio_ext("zero.wav", "Zero", std_delay, 60);
-    queue_number_ext(h, std_delay, 20);
+    queue_audio_ext("zero.wav", "Zero", std_delay, 0);
+    queue_number_ext(h, std_delay, 0);
   } else {
-    queue_complex_number(h, std_delay, 20);
+    queue_complex_number(h, std_delay, 0);
   }
 
   if (m == 0) {
-    if (h != 0) queue_audio_ext("hundred.wav", "Hundred", say_hours ? std_delay : std_delay, 20);
+    if (h != 0) queue_audio_ext("hundred.wav", "Hundred", say_hours ? std_delay : std_delay, 0);
   } else if (m < 10) {
-    queue_audio_ext("zero.wav", "Zero", std_delay, 80);
-    queue_number_ext(m, say_hours ? std_delay : std_delay, 20);
+    queue_audio_ext("zero.wav", "Zero", std_delay, 0);
+    queue_number_ext(m, say_hours ? std_delay : std_delay, 0);
   } else {
-    queue_complex_number(m, say_hours ? std_delay : std_delay, 20);
+    queue_complex_number(m, say_hours ? std_delay : std_delay, 0);
   }
 
   if (say_hours) {
-    queue_audio_ext("hours.wav", "Hours", std_delay, 20);
+    queue_audio_ext("hours.wav", "Hours", std_delay, 0);
   }
 }
 
 static void build_24h_civilian(uint8_t h, uint8_t m, bool say_hours) {
-  int16_t std_delay = -20;
+  int16_t std_delay = 0;
 
   if (m == 0 && h == 0) {
-    // FIX: Suppress "Hours" fallback when printing Midnight
     queue_audio_ext("midnight.wav", "Midnight", 0, 0);
     return;
   }
 
   if (h < 10) {
-    queue_audio_ext("oh.wav", "Oh", std_delay, 60);
-    queue_number_ext(h, std_delay, 20);
+    queue_audio_ext("oh.wav", "Oh", std_delay, 0);
+    queue_number_ext(h, std_delay, 0);
   } else {
-    queue_complex_number(h, std_delay, 20);
+    queue_complex_number(h, std_delay, 0);
   }
 
   if (m == 0) {
-    if (h != 0) queue_audio_ext("hundred.wav", "Hundred", say_hours ? std_delay : std_delay, 20);
+    if (h != 0) queue_audio_ext("hundred.wav", "Hundred", say_hours ? std_delay : std_delay, 0);
   } else if (m < 10) {
-    queue_audio_ext("oh.wav", "Oh", std_delay, 80);
-    queue_number_ext(m, say_hours ? std_delay : std_delay, 20);
+    queue_audio_ext("oh.wav", "Oh", std_delay, 0);
+    queue_number_ext(m, say_hours ? std_delay : std_delay, 0);
   } else {
-    queue_complex_number(m, say_hours ? std_delay : std_delay, 20);
+    queue_complex_number(m, say_hours ? std_delay : std_delay, 0);
   }
 
   if (say_hours) {
-    queue_audio_ext("hours.wav", "Hours", std_delay, 20);
+    queue_audio_ext("hours.wav", "Hours", std_delay, 0);
   }
 }
 
@@ -212,14 +208,14 @@ static void build_colloquial(uint8_t h, uint8_t m, bool is_us) {
   uint8_t display_h = abs_h % 12;
   if (display_h == 0) display_h = 12;
 
-  int16_t cd = -s_settings.playback_speed - 30;
-  int16_t ct = 30;
+  int16_t cd = -s_settings.playback_speed;
+  int16_t ct = 0;
 
-  int16_t past_d = -s_settings.playback_speed - 10;
-  int16_t past_t = 20;
+  int16_t past_d = -s_settings.playback_speed;
+  int16_t past_t = 0;
 
-  int16_t to_d = -s_settings.playback_speed - 60;
-  int16_t to_t = 40;
+  int16_t to_d = -s_settings.playback_speed;
+  int16_t to_t = 0;
 
   if (rel_m == 15) {
     queue_audio_ext(is_us ? "a_quarter.wav" : "quarter.wav", is_us ? "A Quarter" : "Quarter", cd, ct);
@@ -241,7 +237,6 @@ static void build_colloquial(uint8_t h, uint8_t m, bool is_us) {
     }
   }
 
-  // FIX: Conversational interception ("Quarter past Midnight" instead of 12)
   if (is_midnight) {
     queue_audio_ext("midnight.wav", "Midnight", 0, 0);
   } else if (is_noon) {
@@ -255,20 +250,20 @@ static void build_fuzzy(uint8_t h, uint8_t m, bool is_us, bool use_ampm) {
   int anchor = ((m + 7) / 15) * 15;
   int diff = m - anchor;
 
-  int16_t mod_delay = (anchor == 0 || anchor == 60) ? (-s_settings.playback_speed - 20) : s_settings.fuzzy_mod_gap;
-  int16_t mod_trim = (anchor == 0 || anchor == 60) ? 20 : 10;
+  int16_t mod_delay = (anchor == 0 || anchor == 60) ? (-s_settings.playback_speed) : s_settings.fuzzy_mod_gap;
+  int16_t mod_trim = 0;
 
   int16_t conv_delay = s_settings.fuzzy_conv_gap;
-  int16_t conv_trim = 30;
+  int16_t conv_trim = 0;
 
   int16_t past_delay = s_settings.fuzzy_past_gap;
-  int16_t past_trim = 20;
+  int16_t past_trim = 0;
 
   int16_t to_delay = s_settings.fuzzy_to_gap;
-  int16_t to_trim = 40;
+  int16_t to_trim = 0;
 
   int16_t tight_delay = s_settings.fuzzy_tight_gap;
-  int16_t tight_trim = 20;
+  int16_t tight_trim = 0;
 
   int16_t ampm_delay = s_settings.fuzzy_ampm_gap;
   int16_t ampm_trim = 0;
@@ -283,12 +278,11 @@ static void build_fuzzy(uint8_t h, uint8_t m, bool is_us, bool use_ampm) {
   uint8_t target_h = abs_h % 12;
   if (target_h == 0) target_h = 12;
 
-  // Derive absolute bounds for conversational overrides
   bool is_midnight = (abs_h == 0 || abs_h == 24);
   bool is_noon = (abs_h == 12);
 
   if (anchor == 0 || anchor == 60) {
-    // Zero anchors have no prefix (e.g. "Almost Noon")
+    // Zero anchors have no prefix
   } else if (anchor == 15) {
     queue_audio_ext(is_us ? "a_quarter.wav" : "quarter.wav", is_us ? "A Quarter" : "Quarter", conv_delay, conv_trim);
     queue_audio_ext(is_us ? "after.wav" : "past.wav", is_us ? "After" : "Past", is_us ? to_delay : past_delay, is_us ? to_trim : past_trim);
@@ -300,13 +294,11 @@ static void build_fuzzy(uint8_t h, uint8_t m, bool is_us, bool use_ampm) {
     queue_audio_ext(is_us ? "till.wav" : "to.wav", is_us ? "Till" : "To", to_delay, to_trim);
   }
 
-  // FIX: Unified hour resolution logic safely suppresses AM/PM/O'Clock for Noon and Midnight
   if (is_midnight) {
     queue_audio_ext("midnight.wav", "Midnight", 0, conv_trim);
   } else if (is_noon) {
     queue_audio_ext("noon.wav", "Noon", 0, conv_trim);
   } else {
-    // Normal numeric hours gracefully accept O'Clock or AM/PM suffixes
     if (anchor == 0 || anchor == 60) {
       queue_number_ext(target_h, tight_delay, tight_trim);
       queue_audio_ext("oclock.wav", "O'clock", use_ampm ? ampm_delay : 0, tight_trim);
@@ -350,24 +342,25 @@ static uint32_t get_playlist_duration_estimate() {
 static void internal_build_telecom(struct tm *t) {
   queue_audio("at_the_tone.wav", "At the tone");
 
-  queue_complex_number(t->tm_hour, -20, 20);
-  queue_audio_ext((t->tm_hour == 1) ? "hour.wav" : "hours.wav", (t->tm_hour == 1) ? "Hour" : "Hours", -20, 20);
+  // Changed to force a 250ms gap before reading the hour value
+  queue_complex_number(t->tm_hour, 250, 0);
+  queue_audio_ext((t->tm_hour == 1) ? "hour.wav" : "Hour", (t->tm_hour == 1) ? "Hour" : "Hours", 0, 0);
 
   // DYNAMIC PRECISE LOGIC:
   if (t->tm_sec == 0) {
     if (t->tm_min > 0) {
-      queue_complex_number(t->tm_min, -20, 20);
-      queue_audio_ext((t->tm_min == 1) ? "minute.wav" : "minutes.wav", (t->tm_min == 1) ? "Minute" : "Minutes", -20, 20);
+      queue_complex_number(t->tm_min, 0, 0);
+      queue_audio_ext((t->tm_min == 1) ? "minute.wav" : "minutes.wav", (t->tm_min == 1) ? "Minute" : "Minutes", 0, 0);
     }
     queue_audio("precisely.wav", "Precisely");
   } else {
-    queue_complex_number(t->tm_min, -20, 20);
-    queue_audio_ext((t->tm_min == 1) ? "minute.wav" : "minutes.wav", (t->tm_min == 1) ? "Minute" : "Minutes", -20, 20);
+    queue_complex_number(t->tm_min, 0, 0);
+    queue_audio_ext((t->tm_min == 1) ? "minute.wav" : "minutes.wav", (t->tm_min == 1) ? "Minute" : "Minutes", 0, 0);
 
     queue_audio("and.wav", "And");
 
-    queue_complex_number(t->tm_sec, -20, 20);
-    queue_audio_ext((t->tm_sec == 1) ? "second.wav" : "seconds.wav", (t->tm_sec == 1) ? "Second" : "Seconds", -20, 20);
+    queue_complex_number(t->tm_sec, 0, 0);
+    queue_audio_ext((t->tm_sec == 1) ? "second.wav" : "seconds.wav", (t->tm_sec == 1) ? "Second" : "Seconds", 0, 0);
   }
 }
 
@@ -484,7 +477,6 @@ static void telecom_beep_callback(void *data) {
   light_enable(false);
 
   // TEMPORARY VOLUME SPOOF: Ensure the beep punches through at low volumes
-  // Correctly handles spoofing during both day and night volume constraints
   s_original_volume = s_settings.volume;
   s_original_night_volume = s_settings.night_volume;
 
@@ -533,7 +525,9 @@ static void play_next_word(void *data) {
   s_current_word_index++;
 
   if (s_current_word_index < s_playlist_size) {
-    int32_t latency_compensation = 75;
+
+    // REDUCED FROM 75 to 30: Prevents file truncation when words are pushed back-to-back
+    int32_t latency_compensation = 30;
 
     int32_t time_to_wait = (int32_t)clip_duration_ms + (int32_t)s_settings.playback_speed + (int32_t)delay_mod - latency_compensation;
     if (time_to_wait < 1) time_to_wait = 1;
@@ -549,7 +543,6 @@ void trigger_playback(bool auto_exit) {
 
   light_enable(false);
 
-  // FIX: Comply with Context Directive 7 (Amplifier Pop Prevention)
   if (s_settings.clock_mode != MODE_TELECOM) {
     cancel_playback();
   }

@@ -4,8 +4,8 @@
  *
  * Released under the MIT License.
  * * Notes:
- * Integrated with 2026 PebbleOS SDK to respect SPEAKER_MAX_SAMPLE_BYTES_TOTAL,
- * preventing STM32 heap panics during long ADPCM decoding passes.
+ * Integrated with 2026 PebbleOS SDK. Features In-Place Memory Optimization
+ * to bypass memory heap constraints and DAC pre-feed to prevent amplifier clipping.
  */
 
 #include <pebble.h>
@@ -99,7 +99,6 @@ static uint32_t get_resource_id_for_filename(const char* filename) {
     if (first == 'p') {
         if (strcmp(filename, "pm.wav") == 0) return RESOURCE_ID_pm;
         if (strcmp(filename, "past.wav") == 0) return RESOURCE_ID_past;
-        // THE FIX: ADD PRECISELY TO THE DICTIONARY
         if (strcmp(filename, "precisely.wav") == 0) return RESOURCE_ID_precisely;
     }
     if (first == 'q' && strcmp(filename, "quarter.wav") == 0) return RESOURCE_ID_quarter;
@@ -262,25 +261,14 @@ uint32_t speaker_play_file(const char* filename, int16_t extra_trim_ms) {
     size_t trim_samples = total_trim_ms * 16;
     if (num_samples > trim_samples + 256) num_samples -= trim_samples;
 
-    // -------------------------------------------------------------------------
-    // NEW SDK 2026 INTEGRATION: SAFEGUARD AGAINST HEAP PANIC
-    // -------------------------------------------------------------------------
-    #ifdef SPEAKER_MAX_SAMPLE_BYTES_TOTAL
-    // If the fully decoded raw PCM buffer exceeds the hardware ceiling exposed
-    // by the SDK, we truncate to guarantee we don't OOM crash the watch.
-    if ((num_samples * 2) > SPEAKER_MAX_SAMPLE_BYTES_TOTAL) {
-        APP_LOG(APP_LOG_LEVEL_WARNING, "Clip size (%lu bytes) exceeds SPEAKER_MAX_SAMPLE_BYTES_TOTAL. Truncating.",
-                (unsigned long)(num_samples * 2));
-        num_samples = SPEAKER_MAX_SAMPLE_BYTES_TOTAL / 2;
-    }
-    #endif
-    // -------------------------------------------------------------------------
+    int16_t *audio_samples = NULL;
 
-    s_audio_buffer = (uint8_t *)malloc(num_samples * 2);
-    int16_t *audio_samples = (int16_t *)s_audio_buffer;
-
-    // DECOMPRESS OR COPY
+    // DECOMPRESS OR COPY IN-PLACE
     if (audio_format == 17) {
+        // ADPCM requires decoding into a newly allocated buffer
+        s_audio_buffer = (uint8_t *)malloc(num_samples * 2);
+        audio_samples = (int16_t *)s_audio_buffer;
+
         size_t sample_idx = 0;
         int16_t pred_sample = 0;
         int8_t step_idx = 0;
@@ -291,14 +279,12 @@ uint32_t speaker_play_file(const char* filename, int16_t extra_trim_ms) {
             uint32_t block_start = data_offset + (b * block_align);
             if (block_start + block_align > res_size) break;
 
-            // Extract the block header (Initial State)
             pred_sample = (int16_t)(raw_buffer[block_start] | (raw_buffer[block_start + 1] << 8));
             step_idx = raw_buffer[block_start + 2];
             if (step_idx > 88) step_idx = 88;
 
             audio_samples[sample_idx++] = pred_sample;
 
-            // Extract and inflate the 4-bit nibbles
             for (uint32_t n = 4; n < block_align && sample_idx < num_samples; n++) {
                 uint8_t byte = raw_buffer[block_start + n];
                 audio_samples[sample_idx++] = decode_ima_adpcm_nibble(byte & 0x0F, &pred_sample, &step_idx);
@@ -307,16 +293,23 @@ uint32_t speaker_play_file(const char* filename, int16_t extra_trim_ms) {
                 }
             }
         }
+        free(raw_buffer);
+        s_current_res_size = num_samples * 2;
+        s_stream_offset = 0;
     } else {
-        // Standard PCM copy
-        for (size_t i = 0; i < num_samples; i++) {
-            audio_samples[i] = (int16_t)(raw_buffer[data_offset + (i * 2)] | (raw_buffer[data_offset + (i * 2) + 1] << 8));
-        }
+        // IN-PLACE PCM OPTIMIZATION: Points the playback array directly at the loaded
+        // raw_buffer. This halves the RAM usage, bypassing the heap limits safely!
+        s_audio_buffer = raw_buffer;
+        audio_samples = (int16_t *)(s_audio_buffer + data_offset);
+        s_current_res_size = data_offset + (num_samples * 2);
+        s_stream_offset = data_offset;
     }
 
     // POST-PROCESSING: Fade & Volume
     uint32_t play_volume = get_current_active_volume();
-    size_t fade_samples = 1024;
+
+    // REDUCED FROM 1024 to 160: Retains hardware click-prevention without muting tight files
+    size_t fade_samples = 160;
     if (num_samples < fade_samples * 2) fade_samples = num_samples / 2;
 
     for (size_t i = 0; i < num_samples; i++) {
@@ -332,9 +325,6 @@ uint32_t speaker_play_file(const char* filename, int16_t extra_trim_ms) {
     }
 
     if (num_samples > 0) audio_samples[num_samples - 1] = 0;
-    free(raw_buffer);
-    s_current_res_size = num_samples * 2;
-    s_stream_offset = 0;
 
     uint32_t duration_ms = num_samples / 16;
 
@@ -342,6 +332,14 @@ uint32_t speaker_play_file(const char* filename, int16_t extra_trim_ms) {
     if (!s_is_stream_open) {
         if (speaker_stream_open(SpeakerPcmFormat_16kHz_16bit, 100)) {
             s_is_stream_open = true;
+
+            // NEW: DAC WAKE-UP BUFFER
+            // Pre-feed the hardware amplifier with ~128ms of pure silence
+            // to allow the magnet to power on before pushing the real audio file
+            for (int j = 0; j < 8; j++) {
+                speaker_stream_write(s_silence_chunk, AUDIO_CHUNK_SIZE);
+            }
+
             push_audio_chunk(NULL);
         } else return 0;
     }
