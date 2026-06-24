@@ -49,9 +49,29 @@ static time_t s_telecom_target_sec = 0;
 
 extern WhisperSettings s_settings;
 
+// --- DYNAMIC PACING HELPERS ---
+static uint8_t get_effective_clock_mode() {
+  if (s_settings.clock_mode == MODE_SYSTEM_DEFAULT) {
+    return clock_is_24h_style() ? MODE_24H_CIVILIAN : MODE_12H_DIGITAL;
+  }
+  return s_settings.clock_mode;
+}
+
+static int16_t get_current_speed() {
+  uint8_t mode = get_effective_clock_mode();
+  if (mode > 5) mode = MODE_12H_DIGITAL; // Array safety bounds
+  return s_settings.mode_speed[mode];
+}
+
+static int16_t get_current_trim() {
+  uint8_t mode = get_effective_clock_mode();
+  if (mode > 5) mode = MODE_12H_DIGITAL;
+  return s_settings.mode_trim[mode];
+}
+// ------------------------------
+
 static void queue_audio_ext(const char* filename, const char* display_text, int16_t delay_mod, int16_t trim_mod) {
   if (s_playlist_size < 20) {
-    // SECURITY FIX: Guaranteed null-termination
     strncpy(s_audio_playlist[s_playlist_size].filename, filename, 15);
     s_audio_playlist[s_playlist_size].filename[15] = '\0';
 
@@ -66,7 +86,6 @@ static void queue_audio_ext(const char* filename, const char* display_text, int1
   }
 }
 
-// Trims and delays zeroed out for tighter custom voice clips
 static void queue_audio(const char* filename, const char* display_text) {
   queue_audio_ext(filename, display_text, 0, 0);
 }
@@ -86,7 +105,7 @@ static void queue_complex_number(int num, int16_t delay, int16_t trim) {
     int tens = (num / 10) * 10;
     int ones = num % 10;
     if (ones > 0) {
-      queue_number_ext(tens, -s_settings.playback_speed, 0);
+      queue_number_ext(tens, -get_current_speed(), 0);
       queue_number_ext(ones, delay, trim);
     } else {
       queue_number_ext(tens, delay, trim);
@@ -98,15 +117,13 @@ static void append_prefix(uint8_t prefix) {
   if (prefix == PREFIX_ITS) {
     queue_audio_ext("its.wav", "It's", s_settings.prefix_gap, 0);
   } else if (prefix == PREFIX_THE_TIME_IS) {
-    queue_audio_ext("the-time-is.wav", "The time is", s_settings.prefix_gap, 0); // Trim forced to 0
+    queue_audio_ext("the-time-is.wav", "The time is", s_settings.prefix_gap, 0);
   }
 }
 
 static void build_12h_digital(uint8_t h, uint8_t m, bool use_ampm) {
   int16_t std_delay = 0;
-
-  // Plosive glide lock: Always attaches to the previous word regardless of global speed
-  int16_t ampm_delay = -s_settings.playback_speed + 25;
+  int16_t ampm_delay = -get_current_speed() + 25;
   int16_t ampm_trim = 0;
 
   if (m == 0 && h == 0) {
@@ -200,7 +217,6 @@ static void build_colloquial(uint8_t h, uint8_t m, bool is_us) {
   uint8_t rel_m = is_past ? m : (60 - m);
   uint8_t rel_h = is_past ? h : (h + 1);
 
-  // Derive absolute bounds for conversational overrides
   int abs_h = rel_h % 24;
   bool is_midnight = (abs_h == 0 || abs_h == 24);
   bool is_noon = (abs_h == 12);
@@ -208,13 +224,13 @@ static void build_colloquial(uint8_t h, uint8_t m, bool is_us) {
   uint8_t display_h = abs_h % 12;
   if (display_h == 0) display_h = 12;
 
-  int16_t cd = -s_settings.playback_speed;
+  int16_t cd = s_settings.fuzzy_conv_gap;
   int16_t ct = 0;
 
-  int16_t past_d = -s_settings.playback_speed;
+  int16_t past_d = s_settings.fuzzy_past_gap;
   int16_t past_t = 0;
 
-  int16_t to_d = -s_settings.playback_speed;
+  int16_t to_d = s_settings.fuzzy_to_gap;
   int16_t to_t = 0;
 
   if (rel_m == 15) {
@@ -242,7 +258,7 @@ static void build_colloquial(uint8_t h, uint8_t m, bool is_us) {
   } else if (is_noon) {
     queue_audio_ext("noon.wav", "Noon", 0, 0);
   } else {
-    queue_number_ext(display_h, cd, ct);
+    queue_number_ext(display_h, s_settings.fuzzy_tight_gap, ct);
   }
 }
 
@@ -250,7 +266,7 @@ static void build_fuzzy(uint8_t h, uint8_t m, bool is_us, bool use_ampm) {
   int anchor = ((m + 7) / 15) * 15;
   int diff = m - anchor;
 
-  int16_t mod_delay = (anchor == 0 || anchor == 60) ? (-s_settings.playback_speed) : s_settings.fuzzy_mod_gap;
+  int16_t mod_delay = (anchor == 0 || anchor == 60) ? (-get_current_speed()) : s_settings.fuzzy_mod_gap;
   int16_t mod_trim = 0;
 
   int16_t conv_delay = s_settings.fuzzy_conv_gap;
@@ -328,12 +344,12 @@ static uint32_t get_playlist_duration_estimate() {
     else if (strcmp(s_audio_playlist[i].filename, "hours.wav") == 0 || strcmp(s_audio_playlist[i].filename, "hour.wav") == 0) word_ms = 800;
     else if (strcmp(s_audio_playlist[i].filename, "and.wav") == 0) word_ms = 400;
 
-    word_ms -= s_settings.clip_trim;
+    word_ms -= get_current_trim();
     word_ms -= s_audio_playlist[i].trim_mod;
     if (word_ms < 100) word_ms = 100;
 
     total_ms += word_ms;
-    total_ms += s_settings.playback_speed;
+    total_ms += get_current_speed();
     total_ms += s_audio_playlist[i].delay_mod;
   }
   return (uint32_t)total_ms;
@@ -342,11 +358,9 @@ static uint32_t get_playlist_duration_estimate() {
 static void internal_build_telecom(struct tm *t) {
   queue_audio("at_the_tone.wav", "At the tone");
 
-  // Changed to force a 250ms gap before reading the hour value
   queue_complex_number(t->tm_hour, 250, 0);
-  queue_audio_ext((t->tm_hour == 1) ? "hour.wav" : "Hour", (t->tm_hour == 1) ? "Hour" : "Hours", 0, 0);
+  queue_audio_ext((t->tm_hour == 1) ? "hour.wav" : "hours.wav", (t->tm_hour == 1) ? "Hour" : "Hours", 0, 0);
 
-  // DYNAMIC PRECISE LOGIC:
   if (t->tm_sec == 0) {
     if (t->tm_min > 0) {
       queue_complex_number(t->tm_min, 0, 0);
@@ -402,11 +416,7 @@ void generate_audio_playlist() {
     return;
   }
 
-  uint8_t effective_mode = s_settings.clock_mode;
-
-  if (effective_mode == MODE_SYSTEM_DEFAULT) {
-    effective_mode = clock_is_24h_style() ? MODE_24H_CIVILIAN : MODE_12H_DIGITAL;
-  }
+  uint8_t effective_mode = get_effective_clock_mode();
 
   if (effective_mode == MODE_COLLOQUIAL || effective_mode == MODE_FUZZY) {
     append_prefix(PREFIX_ITS);
@@ -443,7 +453,7 @@ void cancel_playback(void) {
     s_beep_timer = NULL;
   }
   speaker_cancel();
-  stop_visualizer(); // Instantly kill UI wave animation
+  stop_visualizer();
   light_enable(true);
 }
 
@@ -476,21 +486,15 @@ static void telecom_beep_callback(void *data) {
 
   light_enable(false);
 
-  // TEMPORARY VOLUME SPOOF: Ensure the beep punches through at low volumes
   s_original_volume = s_settings.volume;
   s_original_night_volume = s_settings.night_volume;
 
-  if (s_settings.volume < 60) {
-    s_settings.volume = 60;
-  }
-  if (s_settings.night_volume < 60) {
-    s_settings.night_volume = 60;
-  }
+  if (s_settings.volume < 60) s_settings.volume = 60;
+  if (s_settings.night_volume < 60) s_settings.night_volume = 60;
 
   uint32_t clip_duration_ms = speaker_play_file("beep.wav", 0);
   start_visualizer_for_clip(clip_duration_ms);
 
-  // Silently revert the volume back to the user's setting shortly after playback
   app_timer_register(clip_duration_ms + 100, restore_volume_callback, NULL);
 
   if (s_auto_exit) {
@@ -506,9 +510,7 @@ static void play_next_word(void *data) {
   light_enable(false);
 
   if (s_current_word_index >= s_playlist_size) {
-    if (s_settings.clock_mode == MODE_TELECOM && s_telecom_target_sec > 0) {
-      return;
-    }
+    if (s_settings.clock_mode == MODE_TELECOM && s_telecom_target_sec > 0) return;
 
     if (s_auto_exit) window_stack_pop_all(true);
     else hide_speaking_graphic();
@@ -520,16 +522,14 @@ static void play_next_word(void *data) {
   int16_t delay_mod = s_audio_playlist[s_current_word_index].delay_mod;
 
   uint32_t clip_duration_ms = speaker_play_file(next_file, trim_mod);
-  start_visualizer_for_clip(clip_duration_ms); // Trigger perfectly synced waveform bounce
+  start_visualizer_for_clip(clip_duration_ms);
 
   s_current_word_index++;
 
   if (s_current_word_index < s_playlist_size) {
-
-    // REDUCED FROM 75 to 30: Prevents file truncation when words are pushed back-to-back
     int32_t latency_compensation = 30;
 
-    int32_t time_to_wait = (int32_t)clip_duration_ms + (int32_t)s_settings.playback_speed + (int32_t)delay_mod - latency_compensation;
+    int32_t time_to_wait = (int32_t)clip_duration_ms + (int32_t)get_current_speed() + (int32_t)delay_mod - latency_compensation;
     if (time_to_wait < 1) time_to_wait = 1;
 
     s_queue_timer = app_timer_register((uint32_t)time_to_wait, play_next_word, NULL);
@@ -547,7 +547,6 @@ void trigger_playback(bool auto_exit) {
     cancel_playback();
   }
 
-  // Explicitly reset the playlist size so the buffer properly clears
   s_playlist_size = 0;
   generate_audio_playlist();
 

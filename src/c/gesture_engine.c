@@ -10,6 +10,8 @@
 #include "settings_engine.h"
 #include "audio_engine.h"
 
+extern void show_speaking_graphic(void);
+
 #define MAX_BUFFER_SIZE 50
 #define GESTURE_PERSIST_KEY 2
 #define MIN(a, b) ((a) < (b) ? (a) : (b))

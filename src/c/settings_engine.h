@@ -8,7 +8,8 @@
 #pragma once
 #include <pebble.h>
 
-#define SETTINGS_PERSIST_KEY 13
+// Bumped to 14 to force a clean memory wipe during OTA update
+#define SETTINGS_PERSIST_KEY 14
 
 // Prefix Enums
 #define PREFIX_NONE 0
@@ -28,12 +29,17 @@ typedef struct __attribute__((__packed__)) {
   uint8_t prefix_mode;
   bool say_ampm;
   bool is_us_dialect;
-  int16_t playback_speed;
+
+  // Independent Pacing Arrays
+  int16_t mode_speed[6];
+
   uint8_t clock_mode;
   uint8_t volume;
-  int16_t clip_trim;
 
-  bool enable_beta_features;
+  // Independent Trim Arrays
+  int16_t mode_trim[6];
+
+  bool enable_experimental_features;
 
   // Background Worker & Scheduling
   bool respect_quiet_time;
@@ -53,23 +59,21 @@ typedef struct __attribute__((__packed__)) {
   int16_t z_multiplier;
   int16_t gesture_buffer_size;
 
-  // FUZZY TUNER
-  int16_t prefix_gap;
-  int16_t prefix_trim;
+  // FUZZY SPECIFIC PACING
   int16_t fuzzy_mod_gap;
   int16_t fuzzy_conv_gap;
   int16_t fuzzy_past_gap;
   int16_t fuzzy_to_gap;
   int16_t fuzzy_tight_gap;
   int16_t fuzzy_ampm_gap;
+
+  // PREFIX PACING
+  int16_t prefix_gap;
+
 } WhisperSettings;
 
-// --- Core Application Logic Exports ---
 void settings_init(void);
 void settings_deinit(void);
 void settings_window_push(void);
-uint8_t get_current_active_volume(void);
-
-// --- Speaking UI Overlay Exports ---
-void show_speaking_graphic(void);
-void hide_speaking_graphic(void);
+uint32_t get_current_active_volume(void);
+void save_settings(void);

@@ -45,7 +45,6 @@ static inline int16_t decode_ima_adpcm_nibble(uint8_t nibble, int16_t *predicted
     if (nibble & 2) diff += step >> 1;
     if (nibble & 4) diff += step;
 
-    // Evaluate math as 32-bit before assigning back to 16-bit
     int32_t new_sample = *predicted_sample;
     if (nibble & 8) new_sample -= diff;
     else new_sample += diff;
@@ -113,7 +112,6 @@ static uint32_t get_resource_id_for_filename(const char* filename) {
     }
     if (first == 'z' && strcmp(filename, "zero.wav") == 0) return RESOURCE_ID_0;
 
-    // --- NUMERIC FILES ---
     if (first == '0' && strcmp(filename, "0.wav") == 0) return RESOURCE_ID_0;
     if (first == '1') {
         if (strcmp(filename, "1.wav") == 0) return RESOURCE_ID_1;
@@ -229,10 +227,9 @@ uint32_t speaker_play_file(const char* filename, int16_t extra_trim_ms) {
 
     uint32_t data_offset = 44;
     uint32_t data_size = 0;
-    uint16_t audio_format = 1; // Default to standard PCM
+    uint16_t audio_format = 1;
     uint16_t block_align = 2;
 
-    // Parse WAV Header to dynamically handle both PCM and ADPCM
     for (uint32_t i = 12; i < res_size - 8; ) {
         uint32_t chunk_size = raw_buffer[i+4] | (raw_buffer[i+5] << 8) | (raw_buffer[i+6] << 16) | (raw_buffer[i+7] << 24);
         if (raw_buffer[i] == 'f' && raw_buffer[i+1] == 'm' && raw_buffer[i+2] == 't' && raw_buffer[i+3] == ' ') {
@@ -247,25 +244,31 @@ uint32_t speaker_play_file(const char* filename, int16_t extra_trim_ms) {
     }
 
     size_t num_samples = 0;
-    if (audio_format == 17) { // 17 (0x0011) indicates IMA ADPCM
+    if (audio_format == 17) {
         uint32_t num_blocks = data_size / block_align;
         uint32_t samples_per_block = (block_align - 4) * 2 + 1;
         num_samples = num_blocks * samples_per_block;
-    } else { // Standard 16-bit uncompressed PCM
+    } else {
         num_samples = data_size / 2;
     }
 
-    // Process User Trim
-    int32_t total_trim_ms = (int32_t)s_settings.clip_trim + (int32_t)extra_trim_ms;
+    // --- DYNAMIC TRIM FIX ---
+    uint8_t effective_mode = s_settings.clock_mode;
+    if (effective_mode == MODE_SYSTEM_DEFAULT) {
+        effective_mode = clock_is_24h_style() ? MODE_24H_CIVILIAN : MODE_12H_DIGITAL;
+    }
+    if (effective_mode > 5) effective_mode = 0;
+
+    int32_t total_trim_ms = (int32_t)s_settings.mode_trim[effective_mode] + (int32_t)extra_trim_ms;
+    // ------------------------
+
     if (total_trim_ms < 0) total_trim_ms = 0;
     size_t trim_samples = total_trim_ms * 16;
     if (num_samples > trim_samples + 256) num_samples -= trim_samples;
 
     int16_t *audio_samples = NULL;
 
-    // DECOMPRESS OR COPY IN-PLACE
     if (audio_format == 17) {
-        // ADPCM requires decoding into a newly allocated buffer
         s_audio_buffer = (uint8_t *)malloc(num_samples * 2);
         audio_samples = (int16_t *)s_audio_buffer;
 
@@ -297,18 +300,13 @@ uint32_t speaker_play_file(const char* filename, int16_t extra_trim_ms) {
         s_current_res_size = num_samples * 2;
         s_stream_offset = 0;
     } else {
-        // IN-PLACE PCM OPTIMIZATION: Points the playback array directly at the loaded
-        // raw_buffer. This halves the RAM usage, bypassing the heap limits safely!
         s_audio_buffer = raw_buffer;
         audio_samples = (int16_t *)(s_audio_buffer + data_offset);
         s_current_res_size = data_offset + (num_samples * 2);
         s_stream_offset = data_offset;
     }
 
-    // POST-PROCESSING: Fade & Volume
     uint32_t play_volume = get_current_active_volume();
-
-    // REDUCED FROM 1024 to 160: Retains hardware click-prevention without muting tight files
     size_t fade_samples = 160;
     if (num_samples < fade_samples * 2) fade_samples = num_samples / 2;
 
@@ -332,14 +330,9 @@ uint32_t speaker_play_file(const char* filename, int16_t extra_trim_ms) {
     if (!s_is_stream_open) {
         if (speaker_stream_open(SpeakerPcmFormat_16kHz_16bit, 100)) {
             s_is_stream_open = true;
-
-            // NEW: DAC WAKE-UP BUFFER
-            // Pre-feed the hardware amplifier with ~128ms of pure silence
-            // to allow the magnet to power on before pushing the real audio file
             for (int j = 0; j < 8; j++) {
                 speaker_stream_write(s_silence_chunk, AUDIO_CHUNK_SIZE);
             }
-
             push_audio_chunk(NULL);
         } else return 0;
     }

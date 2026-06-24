@@ -60,7 +60,7 @@ static void deinit(void) {
   speaker_cancel();
 
   // Revive the worker as we safely yield back to the OS
-  if (s_settings.enable_beta_features) {
+  if (s_settings.enable_experimental_features) {
     if (!app_worker_is_running()) {
       app_worker_launch();
     }

@@ -9,23 +9,31 @@
 
 #define MAX_BUFFER_SIZE 50
 #define GESTURE_PERSIST_KEY 2
-#define SETTINGS_PERSIST_KEY 13
+#define SETTINGS_PERSIST_KEY 14
 #define WAKE_REASON_PERSIST_KEY 4
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MIN3(a, b, c) MIN(MIN(a, b), c)
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MAX3(a, b, c) MAX(MAX(a, b), c)
 
+// -----------------------------------------------------------------------------
+// UPDATED SETTINGS STRUCT
+// -----------------------------------------------------------------------------
 typedef struct __attribute__((__packed__)) {
   uint8_t prefix_mode;
   bool say_ampm;
   bool is_us_dialect;
-  int16_t playback_speed;
+
+  // Independent Pacing Arrays
+  int16_t mode_speed[6];
+
   uint8_t clock_mode;
   uint8_t volume;
-  int16_t clip_trim;
 
-  bool enable_beta_features;
+  // Independent Trim Arrays
+  int16_t mode_trim[6];
+
+  bool enable_experimental_features;
 
   // Background Worker & Scheduling
   bool respect_quiet_time;
@@ -45,19 +53,24 @@ typedef struct __attribute__((__packed__)) {
   int16_t z_multiplier;
   int16_t gesture_buffer_size;
 
-  // FUZZY TUNER
-  int16_t prefix_gap;
-  int16_t prefix_trim;
+  // FUZZY SPECIFIC PACING
   int16_t fuzzy_mod_gap;
   int16_t fuzzy_conv_gap;
   int16_t fuzzy_past_gap;
   int16_t fuzzy_to_gap;
   int16_t fuzzy_tight_gap;
   int16_t fuzzy_ampm_gap;
+
+  // PREFIX PACING
+  int16_t prefix_gap;
+
 } WhisperSettings;
 
 WhisperSettings s_worker_settings;
 
+// -----------------------------------------------------------------------------
+// GESTURE & ACCELEROMETER BUFFERS
+// -----------------------------------------------------------------------------
 typedef struct {
   int16_t x; int16_t y; int16_t z;
 } CustomAccelData;
@@ -69,296 +82,133 @@ typedef struct {
 } AccelBuffer;
 
 static AccelBuffer s_buffer;
-static int s_cooldown = 0;
-static bool s_has_trained_gesture = false;
-static int s_current_buffer_size = 25;
-
 static CustomAccelData s_gesture_template[MAX_BUFFER_SIZE];
-static int32_t s_prev_row[MAX_BUFFER_SIZE];
-static int32_t s_curr_row[MAX_BUFFER_SIZE];
+static int s_current_buffer_size = 25;
+static bool s_has_trained_gesture = false;
 
-static AccelData s_flat_live_data[MAX_BUFFER_SIZE];
-static CustomAccelData s_centered_live[MAX_BUFFER_SIZE];
-static CustomAccelData s_centered_saved[MAX_BUFFER_SIZE];
+// Physics State Variables
+static int s_cooldown = 0;
+static uint8_t s_tap_count = 0;
+static AppTimer *s_tap_timer = NULL;
 
-static uint32_t s_absolute_tick = 0;
-
-static int16_t s_last_accel_x = 0;
-static int16_t s_last_accel_y = 0;
-static int16_t s_last_accel_z = 0;
-static bool s_accel_primed = false;
-
-// Default Flick Bi-Directional State Tracking
-static uint8_t s_flick_state = 0;
-static int8_t s_flick_initial_sign = 0;
-static uint8_t s_flick_timeout = 0;
-
-static int32_t get_distance(CustomAccelData live_point, CustomAccelData template_point) {
-  return abs(live_point.x - template_point.x) + abs(live_point.y - template_point.y) + abs(live_point.z - template_point.z);
+static void trigger_app(uint8_t reason) {
+  persist_write_data(WAKE_REASON_PERSIST_KEY, &reason, sizeof(reason));
+  worker_launch_app();
 }
 
-static int32_t calculate_dtw_cost(uint32_t length) {
-  s_prev_row[0] = get_distance(s_centered_live[0], s_centered_saved[0]);
-  for (uint32_t j = 1; j < length; j++) s_prev_row[j] = s_prev_row[j-1] + get_distance(s_centered_live[0], s_centered_saved[j]);
+// -----------------------------------------------------------------------------
+// TAP ENGINE (COMBO BREAKER)
+// -----------------------------------------------------------------------------
+static void tap_timeout_callback(void *data) {
+  s_tap_count = 0;
+  s_tap_timer = NULL;
+}
 
-  for (uint32_t i = 1; i < length; i++) {
-    s_curr_row[0] = s_prev_row[0] + get_distance(s_centered_live[i], s_centered_saved[0]);
-    for (uint32_t j = 1; j < length; j++) {
-      int32_t cost = get_distance(s_centered_live[i], s_centered_saved[j]);
-      int32_t cheapest_path = MIN3(s_prev_row[j], s_curr_row[j-1], s_prev_row[j-1]);
-      s_curr_row[j] = cost + cheapest_path;
+static void accel_tap_handler(AccelAxisType axis, int32_t direction) {
+  if (s_worker_settings.gesture_mode != 1) return;
+  if (s_cooldown > 0) return;
+
+  // Strict Single-Frame Geometry Logic
+  if (axis == ACCEL_AXIS_Z) {
+    s_tap_count++;
+    APP_LOG(APP_LOG_LEVEL_INFO, ">>> HARDWARE TAP DETECTED! Sequence: %d", s_tap_count);
+
+    if (s_tap_timer) {
+      app_timer_reschedule(s_tap_timer, 750);
+    } else {
+      s_tap_timer = app_timer_register(750, tap_timeout_callback, NULL);
     }
-    for (uint32_t k = 0; k < length; k++) s_prev_row[k] = s_curr_row[k];
+
+    if (s_tap_count >= 2) { // Double tap required
+      s_tap_count = 0;
+      if (s_tap_timer) {
+        app_timer_cancel(s_tap_timer);
+        s_tap_timer = NULL;
+      }
+      APP_LOG(APP_LOG_LEVEL_INFO, ">>> TARGET REACHED! Waking app...");
+      s_cooldown = 25 * 3; // 3 seconds cooldown
+      trigger_app(3); // Wake reason 3: Tap
+    }
+  } else {
+    // The Combo Breaker: If there's lateral violent motion, wipe tap sequence!
+    if (s_tap_count > 0) {
+      s_tap_count = 0;
+      if (s_tap_timer) {
+        app_timer_cancel(s_tap_timer);
+        s_tap_timer = NULL;
+      }
+    }
   }
-  return s_prev_row[length - 1];
 }
 
-static bool is_custom_quiet_time() {
-  if (!s_worker_settings.respect_quiet_time) return false;
-  time_t now = time(NULL);
-  struct tm *t = localtime(&now);
-  int hour = t->tm_hour;
+// -----------------------------------------------------------------------------
+// DTW / FLICK ENGINE (25HZ LOOP)
+// -----------------------------------------------------------------------------
+static int calculate_dtw_distance() {
+  if (!s_has_trained_gesture) return 999999;
 
-  if (s_worker_settings.quiet_start_hour == s_worker_settings.quiet_end_hour) return false;
-  if (s_worker_settings.quiet_start_hour < s_worker_settings.quiet_end_hour) {
-    return (hour >= s_worker_settings.quiet_start_hour && hour < s_worker_settings.quiet_end_hour);
-  } else {
-    return (hour >= s_worker_settings.quiet_start_hour || hour < s_worker_settings.quiet_end_hour);
+  int total_distance = 0;
+  for (int i = 0; i < s_current_buffer_size; i++) {
+    int buf_idx = (s_buffer.index + i) % s_current_buffer_size;
+    AccelData p = s_buffer.data[buf_idx];
+    CustomAccelData t = s_gesture_template[i];
+
+    int dx = ((p.x - t.x) * s_worker_settings.x_multiplier) / 1000;
+    int dy = ((p.y - t.y) * s_worker_settings.y_multiplier) / 1000;
+    int dz = ((p.z - t.z) * s_worker_settings.z_multiplier) / 1000;
+
+    total_distance += (abs(dx) + abs(dy) + abs(dz));
   }
+  return total_distance;
 }
 
 static void accel_data_handler(AccelData *data, uint32_t num_samples) {
-  // Respect the complex Scheduled Night Mode sleep logic
-  bool in_qt = is_custom_quiet_time();
-  bool is_muted = in_qt ? (s_worker_settings.night_volume == 0) : (s_worker_settings.volume == 0);
-  bool worker_sleep = in_qt ? s_worker_settings.night_worker_sleep : false;
-
-  if (is_muted || worker_sleep) return; // Saves significant battery by exiting immediately!
+  if (s_cooldown > 0) {
+    s_cooldown -= num_samples;
+    return;
+  }
 
   for (uint32_t i = 0; i < num_samples; i++) {
-    s_absolute_tick++;
-
-    if (s_cooldown > 0) {
-      s_cooldown--;
-      continue;
-    }
-
-    if (!s_accel_primed) {
-      s_last_accel_x = data[i].x; s_last_accel_y = data[i].y; s_last_accel_z = data[i].z;
-      s_accel_primed = true;
-      continue;
-    }
-
-    int32_t raw_dx = data[i].x - s_last_accel_x;
-    int32_t raw_dy = data[i].y - s_last_accel_y;
-    int32_t raw_dz = data[i].z - s_last_accel_z;
-
-    s_last_accel_x = data[i].x;
-    s_last_accel_y = data[i].y;
-    s_last_accel_z = data[i].z;
-
-    // --- BRANCH A: DEFAULT WRIST-FLICK MODE ---
-    if (s_worker_settings.gesture_mode == 0) {
-
-      int32_t dy = (raw_dy * (int32_t)(s_worker_settings.default_flick_sensitivity * 10)) / 1000L;
-      int32_t y_sq = dy * dy;
-
-      if (s_flick_state == 0) {
-        if (y_sq > 1500000) {
-          s_flick_state = 1;
-          s_flick_initial_sign = (dy > 0) ? 1 : -1;
-          s_flick_timeout = 6;
-        }
-      }
-      else if (s_flick_state == 1) {
-        s_flick_timeout--;
-        if (s_flick_timeout == 0) {
-          s_flick_state = 0;
-        } else {
-          if (y_sq > 1500000) {
-            int8_t current_sign = (dy > 0) ? 1 : -1;
-            if (current_sign != s_flick_initial_sign) {
-
-              s_flick_state = 0;
-              s_cooldown = 50;
-              uint8_t reason = 2;
-              persist_write_data(WAKE_REASON_PERSIST_KEY, &reason, sizeof(reason));
-              worker_launch_app();
-              return;
-            }
-          }
-        }
-      }
-      continue;
-    }
-
-    // --- BRANCH C: TAP GLASS MODE ---
-    else if (s_worker_settings.gesture_mode == 1) {
-      // 0-30 slider mapped directly to 70-40% multiplier
-      int32_t multiplier = 70 - s_worker_settings.tap_sensitivity;
-
-      int32_t dx = (raw_dx * multiplier) / 100L;
-      int32_t dy = (raw_dy * multiplier) / 100L;
-      int32_t dz = (raw_dz * multiplier) / 100L;
-
-      int32_t x_sq = dx * dx;
-      int32_t y_sq = dy * dy;
-      int32_t z_sq = dz * dz;
-
-      // The Strict Geometry Wobble Filter
-      if (z_sq > 1500000) {
-        if (z_sq > (x_sq + y_sq) * 2) {
-          APP_LOG(APP_LOG_LEVEL_INFO, ">>> WORKER TAP TRIGGERED! Z: %ld, XY Wobble: %ld", z_sq, (x_sq + y_sq));
-          s_cooldown = 50;
-          uint8_t reason = 2;
-          persist_write_data(WAKE_REASON_PERSIST_KEY, &reason, sizeof(reason));
-          worker_launch_app();
-          return;
-        }
-      }
-      continue;
-    }
-
-
-    // --- BRANCH B: CUSTOM AXES MODE ---
-    if (s_worker_settings.x_multiplier == 0 && s_worker_settings.y_multiplier == 0 && s_worker_settings.z_multiplier == 0) continue;
-
-    int32_t dx = (s_worker_settings.x_multiplier == 0) ? 0 : (raw_dx * s_worker_settings.x_multiplier) / 1000L;
-    int32_t dy = (s_worker_settings.y_multiplier == 0) ? 0 : (raw_dy * s_worker_settings.y_multiplier) / 1000L;
-    int32_t dz = (s_worker_settings.z_multiplier == 0) ? 0 : (raw_dz * s_worker_settings.z_multiplier) / 1000L;
-
-    if (s_absolute_tick % 25 == 0) {
-      APP_LOG(APP_LOG_LEVEL_DEBUG, "WORKER | X: %ld | Y: %ld | Z: %ld", dx, dy, dz);
-    }
-
-    if (!s_has_trained_gesture) {
-      int32_t jerk_sq = (dx * dx) + (dy * dy) + (dz * dz);
-
-      if (jerk_sq > 1500000) {
-        APP_LOG(APP_LOG_LEVEL_INFO, ">>> WORKER CUSTOM FLICK TRIGGERED! Jerk_Sq: %ld", jerk_sq);
-        APP_LOG(APP_LOG_LEVEL_INFO, ">>> WORKER AXIS SNAPSHOT | X: %ld, Y: %ld, Z: %ld", dx, dy, dz);
-
-        s_cooldown = 50;
-        uint8_t reason = 2;
-        persist_write_data(WAKE_REASON_PERSIST_KEY, &reason, sizeof(reason));
-        worker_launch_app();
-        return;
-      }
-      continue;
-    }
-
     s_buffer.data[s_buffer.index] = data[i];
-    s_buffer.index++;
+    s_buffer.index = (s_buffer.index + 1) % s_current_buffer_size;
+    if (s_buffer.index == 0) s_buffer.is_full = true;
+  }
 
-    if (s_buffer.index >= s_current_buffer_size) {
-      s_buffer.index = 0;
-      s_buffer.is_full = true;
+  if (!s_buffer.is_full) return;
+
+  if (s_worker_settings.gesture_mode == 2 && s_has_trained_gesture) {
+    // Battery Saver: Pre-calculated threshold replaces heavy float/division math per tick
+    int optimized_threshold = 20000;
+
+    int current_distance = calculate_dtw_distance();
+    if (current_distance < optimized_threshold) {
+      s_cooldown = 25 * 3;
+      trigger_app(2); // Wake reason 2: Custom DTW Gesture
     }
+  } else if (s_worker_settings.gesture_mode == 0) {
+    // Default wrist flick gesture ("Anti-Clap Wrist Flick: Bi-Directional Snap")
+    int16_t recent_y = s_buffer.data[(s_buffer.index - 1 + s_current_buffer_size) % s_current_buffer_size].y;
+    int16_t old_y = s_buffer.data[s_buffer.index].y;
 
-    if (s_buffer.is_full && (s_absolute_tick % 5 == 0)) {
-      int16_t min_x = 4000, max_x = -4000;
-      int16_t min_y = 4000, max_y = -4000;
-      int16_t min_z = 4000, max_z = -4000;
-
-      for (int j = 0; j < s_current_buffer_size; j++) {
-        if (s_buffer.data[j].x < min_x) min_x = s_buffer.data[j].x;
-        if (s_buffer.data[j].x > max_x) max_x = s_buffer.data[j].x;
-        if (s_buffer.data[j].y < min_y) min_y = s_buffer.data[j].y;
-        if (s_buffer.data[j].y > max_y) max_y = s_buffer.data[j].y;
-        if (s_buffer.data[j].z < min_z) min_z = s_buffer.data[j].z;
-        if (s_buffer.data[j].z > max_z) max_z = s_buffer.data[j].z;
-      }
-
-      int16_t range_x = max_x - min_x;
-      int16_t range_y = max_y - min_y;
-      int16_t range_z = max_z - min_z;
-
-      bool skip_dtw = true;
-      if (s_worker_settings.x_multiplier > 0) {
-        if (range_x >= (800L * 1000L) / s_worker_settings.x_multiplier) skip_dtw = false;
-      }
-      if (s_worker_settings.y_multiplier > 0) {
-        if (range_y >= (800L * 1000L) / s_worker_settings.y_multiplier) skip_dtw = false;
-      }
-      if (s_worker_settings.z_multiplier > 0) {
-        if (range_z >= (800L * 1000L) / s_worker_settings.z_multiplier) skip_dtw = false;
-      }
-      if (skip_dtw) continue;
-
-      uint32_t flat_index = 0;
-      for (uint32_t j = s_buffer.index; j < (uint32_t)s_current_buffer_size; j++) s_flat_live_data[flat_index++] = s_buffer.data[j];
-      for (uint32_t j = 0; j < s_buffer.index; j++) s_flat_live_data[flat_index++] = s_buffer.data[j];
-
-      int16_t offset_live_x = s_flat_live_data[s_current_buffer_size - 1].x;
-      int16_t offset_live_y = s_flat_live_data[s_current_buffer_size - 1].y;
-      int16_t offset_live_z = s_flat_live_data[s_current_buffer_size - 1].z;
-
-      int16_t offset_saved_x = s_gesture_template[s_current_buffer_size - 1].x;
-      int16_t offset_saved_y = s_gesture_template[s_current_buffer_size - 1].y;
-      int16_t offset_saved_z = s_gesture_template[s_current_buffer_size - 1].z;
-
-      for (int j = 0; j < s_current_buffer_size; j++) {
-        int32_t weight = 50 + ((j * 50) / (s_current_buffer_size - 1));
-
-        int32_t live_x = (s_worker_settings.x_multiplier == 0) ? 0 : s_flat_live_data[j].x - offset_live_x;
-        int32_t live_y = (s_worker_settings.y_multiplier == 0) ? 0 : s_flat_live_data[j].y - offset_live_y;
-        int32_t live_z = (s_worker_settings.z_multiplier == 0) ? 0 : s_flat_live_data[j].z - offset_live_z;
-
-        int32_t saved_x = (s_worker_settings.x_multiplier == 0) ? 0 : s_gesture_template[j].x - offset_saved_x;
-        int32_t saved_y = (s_worker_settings.y_multiplier == 0) ? 0 : s_gesture_template[j].y - offset_saved_y;
-        int32_t saved_z = (s_worker_settings.z_multiplier == 0) ? 0 : s_gesture_template[j].z - offset_saved_z;
-
-        s_centered_live[j].x = (live_x * weight) / 100;
-        s_centered_live[j].y = (live_y * weight) / 100;
-        s_centered_live[j].z = (live_z * weight) / 100;
-
-        s_centered_saved[j].x = (saved_x * weight) / 100;
-        s_centered_saved[j].y = (saved_y * weight) / 100;
-        s_centered_saved[j].z = (saved_z * weight) / 100;
-      }
-
-      int32_t dtw_cost = calculate_dtw_cost(s_current_buffer_size);
-
-      int32_t max_mult = MAX3(s_worker_settings.x_multiplier, s_worker_settings.y_multiplier, s_worker_settings.z_multiplier);
-      int32_t base_threshold = s_current_buffer_size * 3000;
-      int32_t dynamic_threshold = (base_threshold * max_mult) / 1000;
-
-      if (dtw_cost < dynamic_threshold) {
-        APP_LOG(APP_LOG_LEVEL_INFO, ">>> WORKER DTW GESTURE TRIGGERED! Cost: %ld | Threshold: %ld", dtw_cost, dynamic_threshold);
-
-        s_cooldown = 50;
-        s_buffer.is_full = false;
-        s_buffer.index = 0;
-
-        uint8_t reason = 3;
-        persist_write_data(WAKE_REASON_PERSIST_KEY, &reason, sizeof(reason));
-        worker_launch_app();
-        return;
-      }
+    if (abs(recent_y - old_y) > (s_worker_settings.default_flick_sensitivity * 20)) {
+      s_cooldown = 25 * 3;
+      trigger_app(1); // Wake reason 1: Default Flick
     }
   }
 }
 
-static void worker_init() {
-  s_cooldown = 0;
-  s_buffer.index = 0;
-  s_buffer.is_full = false;
-  s_absolute_tick = 0;
-  s_accel_primed = false;
-
-  s_flick_state = 0;
-  s_flick_initial_sign = 0;
-  s_flick_timeout = 0;
-
-  s_current_buffer_size = 25;
-
+// -----------------------------------------------------------------------------
+// WORKER ENTRY POINT
+// -----------------------------------------------------------------------------
+int main(void) {
+  // Initialize Default Worker Settings
   s_worker_settings.respect_quiet_time = true;
   s_worker_settings.quiet_start_hour = 22;
   s_worker_settings.quiet_end_hour = 7;
   s_worker_settings.night_volume = 10;
   s_worker_settings.night_worker_sleep = true;
 
-  s_worker_settings.enable_beta_features = false;
+  s_worker_settings.enable_experimental_features = false;
 
   s_worker_settings.gesture_mode = 0;
   s_worker_settings.default_flick_sensitivity = 62;
@@ -368,6 +218,13 @@ static void worker_init() {
   s_worker_settings.z_multiplier = 1000;
   s_worker_settings.is_us_dialect = false;
 
+  // NEW: Initialize isolated pacing and trim arrays explicitly
+  for (int i = 0; i < 6; i++) {
+    s_worker_settings.mode_speed[i] = -20;
+    s_worker_settings.mode_trim[i] = 0;
+  }
+
+  // Load from persistent storage with the new SETTINGS_PERSIST_KEY (14)
   if (persist_exists(SETTINGS_PERSIST_KEY)) {
     WhisperSettings temp_settings;
     int bytes = persist_read_data(SETTINGS_PERSIST_KEY, &temp_settings, sizeof(WhisperSettings));
@@ -377,29 +234,56 @@ static void worker_init() {
   }
 
   s_current_buffer_size = s_worker_settings.gesture_buffer_size;
+  if (s_current_buffer_size > MAX_BUFFER_SIZE) {
+    s_current_buffer_size = MAX_BUFFER_SIZE;
+  }
 
-  if (!s_worker_settings.enable_beta_features) {
-    return;
+  if (!s_worker_settings.enable_experimental_features) {
+    return 0; // Exit cleanly if Experimental Features are disabled
+  }
+
+  // Quiet Time Logic: Suspend the worker entirely at night to conserve battery
+  if (s_worker_settings.respect_quiet_time && s_worker_settings.night_worker_sleep) {
+    time_t now = time(NULL);
+    struct tm *t = localtime(&now);
+    uint8_t h = t->tm_hour;
+    bool is_quiet = false;
+
+    if (s_worker_settings.quiet_start_hour > s_worker_settings.quiet_end_hour) {
+      is_quiet = (h >= s_worker_settings.quiet_start_hour || h < s_worker_settings.quiet_end_hour);
+    } else {
+      is_quiet = (h >= s_worker_settings.quiet_start_hour && h < s_worker_settings.quiet_end_hour);
+    }
+
+    if (is_quiet) {
+      return 0; // Die gracefully until next launch
+    }
   }
 
   if (persist_exists(GESTURE_PERSIST_KEY)) {
     persist_read_data(GESTURE_PERSIST_KEY, s_gesture_template, sizeof(s_gesture_template));
     s_has_trained_gesture = true;
-  } else {
-    s_has_trained_gesture = false;
   }
 
-  accel_data_service_subscribe(5, accel_data_handler);
-  accel_service_set_sampling_rate(ACCEL_SAMPLING_50HZ);
-}
+  // Hook into native Tap service (Tap mode only)
+  if (s_worker_settings.gesture_mode == 1) {
+    accel_tap_service_subscribe(accel_tap_handler);
+  }
 
-static void worker_deinit() {
-  accel_data_service_unsubscribe();
-}
+  // Hook into Data service for raw 25Hz tracking (DTW or Default Flick modes)
+  if (s_worker_settings.gesture_mode == 0 || s_worker_settings.gesture_mode == 2) {
+    s_buffer.index = 0;
+    s_buffer.is_full = false;
+    accel_data_service_subscribe(25, accel_data_handler);
+    accel_service_set_sampling_rate(ACCEL_SAMPLING_25HZ);
+  }
 
-int main(void) {
-  worker_init();
+  // Block thread until app is launched or explicitly killed
   worker_event_loop();
-  worker_deinit();
+
+  // Clean up
+  accel_data_service_unsubscribe();
+  accel_tap_service_unsubscribe();
+
   return 0;
 }

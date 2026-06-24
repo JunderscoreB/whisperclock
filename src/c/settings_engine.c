@@ -26,6 +26,21 @@
 #include <stdlib.h>
 #include "gesture_engine.h"
 
+// Forward declarations to satisfy strict C compiler requirements
+void hide_speaking_graphic(void);
+extern void show_speaking_graphic(void);
+
+WhisperSettings s_settings;
+
+static uint8_t get_ui_effective_mode(void) {
+  uint8_t effective_mode = s_settings.clock_mode;
+  if (effective_mode == MODE_SYSTEM_DEFAULT) {
+    effective_mode = clock_is_24h_style() ? MODE_24H_CIVILIAN : MODE_12H_DIGITAL;
+  }
+  if (effective_mode > 5) effective_mode = 0;
+  return effective_mode;
+}
+
 #define GESTURE_PERSIST_KEY 2
 
 // UI Touch Math Constraints (Dynamically scaled for Emery's higher resolution)
@@ -37,8 +52,6 @@
 #define UI_HEADER_HEIGHT 16
 #endif
 
-WhisperSettings s_settings;
-
 // --- MAIN MENU (CUSTOM MENULAYER) ---
 static Window *s_menu_window = NULL;
 static MenuLayer *s_main_menu_layer = NULL;
@@ -46,15 +59,31 @@ static SimpleMenuSection s_menu_sections[1];
 static SimpleMenuItem s_menu_items[30];
 static int16_t s_main_edit_row = -1;
 
-// --- FUZZY TUNER SUBMENU (CUSTOM MENULAYER) ---
+// --- SPEECH TUNER SUBMENU (CUSTOM MENULAYER) ---
 static Window *s_tuner_window = NULL;
 static MenuLayer *s_tuner_menu_layer = NULL;
 static int16_t s_tuner_edit_row = -1;
 
+// Dynamic Tuner Mapping
+enum TunerRowType {
+  TUNER_TEST_AUDIO,
+  TUNER_INTERVAL,
+  TUNER_TRIM,
+  TUNER_PREFIX_GAP,
+  TUNER_FUZZY_MOD,
+  TUNER_FUZZY_CONV,
+  TUNER_FUZZY_PAST,
+  TUNER_FUZZY_TO,
+  TUNER_FUZZY_TIGHT,
+  TUNER_FUZZY_AMPM,
+  TUNER_RESET
+};
+
+static int s_tuner_row_map[12];
+static int s_tuner_num_rows = 0;
+
 static char s_volume_text[16];
 static char s_night_volume_text[16];
-static char s_speed_text[24];
-static char s_trim_text[24];
 static char s_quiet_start_text[24];
 static char s_quiet_end_text[24];
 static char s_sensitivity_text[16];
@@ -84,7 +113,7 @@ static void tuner_touch_handler(const TouchEvent *event, void *context);
 #endif
 
 // --- UNIVERSAL VOLUME HELPER ---
-uint8_t get_current_active_volume(void) {
+uint32_t get_current_active_volume(void) {
   bool in_qt = false;
   if (s_settings.respect_quiet_time) {
     time_t now = time(NULL);
@@ -101,7 +130,7 @@ uint8_t get_current_active_volume(void) {
 }
 
 
-static void save_settings() {
+void save_settings(void) {
   persist_write_data(SETTINGS_PERSIST_KEY, &s_settings, sizeof(WhisperSettings));
 }
 
@@ -113,7 +142,36 @@ static void update_menu_ui_only() {
   }
 }
 
+static void build_tuner_items(void) {
+  s_tuner_num_rows = 0;
+  uint8_t mode = get_ui_effective_mode();
+
+  s_tuner_row_map[s_tuner_num_rows++] = TUNER_TEST_AUDIO;
+  s_tuner_row_map[s_tuner_num_rows++] = TUNER_INTERVAL;
+  s_tuner_row_map[s_tuner_num_rows++] = TUNER_TRIM;
+
+  // Only show prefix gap if a prefix is enabled, or if in conversational modes that force "It's"
+  if (s_settings.prefix_mode != PREFIX_NONE || mode == MODE_COLLOQUIAL || mode == MODE_FUZZY) {
+    s_tuner_row_map[s_tuner_num_rows++] = TUNER_PREFIX_GAP;
+  }
+
+  // Show these advanced gaps if currently in Fuzzy OR Colloquial Mode
+  if (mode == MODE_FUZZY || mode == MODE_COLLOQUIAL) {
+    s_tuner_row_map[s_tuner_num_rows++] = TUNER_FUZZY_MOD;
+    s_tuner_row_map[s_tuner_num_rows++] = TUNER_FUZZY_CONV;
+    s_tuner_row_map[s_tuner_num_rows++] = TUNER_FUZZY_PAST;
+    s_tuner_row_map[s_tuner_num_rows++] = TUNER_FUZZY_TO;
+    s_tuner_row_map[s_tuner_num_rows++] = TUNER_FUZZY_TIGHT;
+    if (s_settings.say_ampm) {
+      s_tuner_row_map[s_tuner_num_rows++] = TUNER_FUZZY_AMPM;
+    }
+  }
+
+  s_tuner_row_map[s_tuner_num_rows++] = TUNER_RESET;
+}
+
 static void update_tuner_ui_only() {
+  build_tuner_items();
   if (s_tuner_menu_layer) {
     menu_layer_reload_data(s_tuner_menu_layer);
   }
@@ -131,67 +189,49 @@ static void update_tuner_and_save() {
 }
 
 void settings_init() {
-  s_settings.prefix_mode = 2;
+  // Default Settings Array Bootstrapper
+  s_settings.prefix_mode = PREFIX_NONE;
   s_settings.say_ampm = true;
-  s_settings.is_us_dialect = true;
-  s_settings.playback_speed = 0;
-  s_settings.gesture_buffer_size = 50;
-  s_settings.clock_mode = 6;
+  s_settings.is_us_dialect = false;
+  s_settings.clock_mode = MODE_SYSTEM_DEFAULT;
   s_settings.volume = 100;
-  s_settings.clip_trim = 0;
-  s_settings.enable_beta_features = false;
 
-  // Night Mode Scheduling Defaults
+  for (int i = 0; i < 6; i++) {
+    s_settings.mode_speed[i] = -20;
+    s_settings.mode_trim[i] = 0;
+  }
+
+  s_settings.enable_experimental_features = false;
   s_settings.respect_quiet_time = true;
   s_settings.quiet_start_hour = 22;
   s_settings.quiet_end_hour = 7;
   s_settings.night_volume = 10;
   s_settings.night_worker_sleep = true;
 
-  // Independent Default Axes
   s_settings.gesture_mode = 0;
   s_settings.default_flick_sensitivity = 62;
-  s_settings.tap_sensitivity = 15; // Default middle of the 0-30 scale
+  s_settings.tap_sensitivity = 15;
+
   s_settings.x_multiplier = 1000;
   s_settings.y_multiplier = 1000;
   s_settings.z_multiplier = 1000;
+  s_settings.gesture_buffer_size = 25;
 
-  s_settings.prefix_gap = 0;
-  s_settings.prefix_trim = 0;
-  s_settings.fuzzy_mod_gap = 10;
-  s_settings.fuzzy_conv_gap = -30;
-  s_settings.fuzzy_past_gap = -10;
-  s_settings.fuzzy_to_gap = -60;
+  s_settings.fuzzy_mod_gap = -20;
+  s_settings.fuzzy_conv_gap = -20;
+  s_settings.fuzzy_past_gap = -20;
+  s_settings.fuzzy_to_gap = -20;
   s_settings.fuzzy_tight_gap = -20;
-  s_settings.fuzzy_ampm_gap = 25;
+  s_settings.fuzzy_ampm_gap = -20;
+  s_settings.prefix_gap = -20;
 
   if (persist_exists(SETTINGS_PERSIST_KEY)) {
     WhisperSettings temp_settings;
-    int bytes_read = persist_read_data(SETTINGS_PERSIST_KEY, &temp_settings, sizeof(WhisperSettings));
-    if (bytes_read == sizeof(WhisperSettings)) {
+    int bytes = persist_read_data(SETTINGS_PERSIST_KEY, &temp_settings, sizeof(WhisperSettings));
+    if (bytes == sizeof(WhisperSettings)) {
       s_settings = temp_settings;
     }
   }
-
-  if (s_settings.prefix_mode > 2) s_settings.prefix_mode = 2;
-  if (s_settings.clock_mode > 6) s_settings.clock_mode = 6;
-  if (s_settings.volume > 100) s_settings.volume = 100;
-  if (s_settings.playback_speed < 0 || s_settings.playback_speed > 350) s_settings.playback_speed = 0;
-  if (s_settings.clip_trim < 0 || s_settings.clip_trim > 150) s_settings.clip_trim = 0;
-
-  if (s_settings.quiet_start_hour > 23) s_settings.quiet_start_hour = 22;
-  if (s_settings.quiet_end_hour > 23) s_settings.quiet_end_hour = 7;
-  if (s_settings.night_volume > 100) s_settings.night_volume = 100;
-
-  if (s_settings.gesture_mode > 2) s_settings.gesture_mode = 0;
-  if (s_settings.default_flick_sensitivity < 55 || s_settings.default_flick_sensitivity > 70) s_settings.default_flick_sensitivity = 62;
-
-  // Safely catch out-of-bounds tap settings (e.g. from the previous build's 55-70 bounds)
-  if (s_settings.tap_sensitivity > 30) s_settings.tap_sensitivity = 15;
-
-  if (s_settings.x_multiplier < 0 || s_settings.x_multiplier > 4000) s_settings.x_multiplier = 1000;
-  if (s_settings.y_multiplier < 0 || s_settings.y_multiplier > 4000) s_settings.y_multiplier = 1000;
-  if (s_settings.z_multiplier < 0 || s_settings.z_multiplier > 4000) s_settings.z_multiplier = 1000;
 }
 
 // -----------------------------------------------------------------------------
@@ -241,10 +281,6 @@ static void main_up_click_handler(ClickRecognizerRef recognizer, void *context) 
     } else if (strcmp(title, "Night Volume") == 0) {
       if (s_settings.night_volume < 20) s_settings.night_volume += 1;
       else { s_settings.night_volume += 5; if (s_settings.night_volume > 100) s_settings.night_volume = 100; }
-    } else if (strcmp(title, "Voice Interval") == 0) {
-      s_settings.playback_speed += 10; if (s_settings.playback_speed > 350) s_settings.playback_speed = 350;
-    } else if (strcmp(title, "Audio Trim") == 0) {
-      s_settings.clip_trim += 10; if (s_settings.clip_trim > 150) s_settings.clip_trim = 150;
     } else if (strcmp(title, "Night Start") == 0) {
       s_settings.quiet_start_hour = (s_settings.quiet_start_hour + 1) % 24;
     } else if (strcmp(title, "Night End") == 0) {
@@ -297,10 +333,6 @@ static void main_down_click_handler(ClickRecognizerRef recognizer, void *context
       if (s_settings.night_volume == 0) { /* do nothing */ }
       else if (s_settings.night_volume <= 20) s_settings.night_volume -= 1;
       else s_settings.night_volume -= 5;
-    } else if (strcmp(title, "Voice Interval") == 0) {
-      s_settings.playback_speed -= 10; if (s_settings.playback_speed < 0) s_settings.playback_speed = 0;
-    } else if (strcmp(title, "Audio Trim") == 0) {
-      s_settings.clip_trim -= 10; if (s_settings.clip_trim < 0) s_settings.clip_trim = 0;
     } else if (strcmp(title, "Night Start") == 0) {
       s_settings.quiet_start_hour = (s_settings.quiet_start_hour == 0) ? 23 : s_settings.quiet_start_hour - 1;
     } else if (strcmp(title, "Night End") == 0) {
@@ -348,8 +380,6 @@ static void main_select_click_handler(ClickRecognizerRef recognizer, void *conte
   bool is_editable = (
     strcmp(title, "Speaker Volume") == 0 ||
     strcmp(title, "Night Volume") == 0 ||
-    strcmp(title, "Voice Interval") == 0 ||
-    strcmp(title, "Audio Trim") == 0 ||
     strcmp(title, "Night Start") == 0 ||
     strcmp(title, "Night End") == 0 ||
     strcmp(title, "Flick Sensitivity") == 0 ||
@@ -393,18 +423,28 @@ static void main_ccp(void *context) {
 
 
 // -----------------------------------------------------------------------------
-// FUZZY TUNER UI CALLBACKS (CUSTOM MENULAYER)
+// DYNAMIC SPEECH PACING TUNER CALLBACKS (CUSTOM MENULAYER)
 // -----------------------------------------------------------------------------
 static uint16_t tuner_get_num_sections_callback(MenuLayer *menu_layer, void *data) {
   return 1;
 }
 
 static uint16_t tuner_get_num_rows_callback(MenuLayer *menu_layer, uint16_t section_index, void *data) {
-  return 10;
+  return s_tuner_num_rows;
 }
 
 static void tuner_draw_header_callback(GContext* ctx, const Layer *cell_layer, uint16_t section_index, void *data) {
-  menu_cell_basic_header_draw(ctx, cell_layer, "Calibration Board");
+  uint8_t mode = get_ui_effective_mode();
+  char *mode_name = "Digital 12-Hour";
+  if (mode == MODE_24H_MILITARY) mode_name = "Military 24-Hour";
+  else if (mode == MODE_24H_CIVILIAN) mode_name = "Civilian 24-Hour";
+  else if (mode == MODE_COLLOQUIAL) mode_name = "Colloquial Mode";
+  else if (mode == MODE_TELECOM) mode_name = "Telecom Radio";
+  else if (mode == MODE_FUZZY) mode_name = "Fuzzy Mode";
+
+  char header_text[40];
+  snprintf(header_text, sizeof(header_text), "Pacing: %s", mode_name);
+  menu_cell_basic_header_draw(ctx, cell_layer, header_text);
 }
 
 static void tuner_draw_row_callback(GContext* ctx, const Layer *cell_layer, MenuIndex *cell_index, void *data) {
@@ -412,17 +452,32 @@ static void tuner_draw_row_callback(GContext* ctx, const Layer *cell_layer, Menu
   char subtitle[32];
   bool is_editing = (s_tuner_edit_row == cell_index->row);
 
-  switch(cell_index->row) {
-    case 0: strcpy(title, "Test Pacing"); strcpy(subtitle, "Hear changes live"); break;
-    case 1: strcpy(title, "Prefix Gap"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.prefix_gap); break;
-    case 2: strcpy(title, "Prefix Trim"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.prefix_trim); break;
-    case 3: strcpy(title, "Almost/Just After"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.fuzzy_mod_gap); break;
-    case 4: strcpy(title, "Fractions / Convo"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.fuzzy_conv_gap); break;
-    case 5: strcpy(title, "Past"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.fuzzy_past_gap); break;
-    case 6: strcpy(title, "To / Till / After"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.fuzzy_to_gap); break;
-    case 7: strcpy(title, "Hour Snapping"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.fuzzy_tight_gap); break;
-    case 8: strcpy(title, "AM / PM Blending"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.fuzzy_ampm_gap); break;
-    case 9: strcpy(title, "Reset to Zero"); strcpy(subtitle, "Clear all adjustments"); break;
+  uint8_t mode = get_ui_effective_mode();
+  int row_type = s_tuner_row_map[cell_index->row];
+
+  switch(row_type) {
+    case TUNER_TEST_AUDIO:
+      strcpy(title, "Test Audio"); strcpy(subtitle, "Preview active mode"); break;
+    case TUNER_INTERVAL:
+      strcpy(title, "Voice Interval"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.mode_speed[mode]); break;
+    case TUNER_TRIM:
+      strcpy(title, "Audio Trim"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.mode_trim[mode]); break;
+    case TUNER_PREFIX_GAP:
+      strcpy(title, "Prefix Gap"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.prefix_gap); break;
+    case TUNER_FUZZY_MOD:
+      strcpy(title, "Almost/Just After"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.fuzzy_mod_gap); break;
+    case TUNER_FUZZY_CONV:
+      strcpy(title, "Fractions / Convo"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.fuzzy_conv_gap); break;
+    case TUNER_FUZZY_PAST:
+      strcpy(title, "Past"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.fuzzy_past_gap); break;
+    case TUNER_FUZZY_TO:
+      strcpy(title, "To / Till / After"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.fuzzy_to_gap); break;
+    case TUNER_FUZZY_TIGHT:
+      strcpy(title, "Hour Snapping"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.fuzzy_tight_gap); break;
+    case TUNER_FUZZY_AMPM:
+      strcpy(title, "AM / PM Blending"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.fuzzy_ampm_gap); break;
+    case TUNER_RESET:
+      strcpy(title, "Reset Defaults"); strcpy(subtitle, "Clear pacing for mode"); break;
   }
 
   if (is_editing) {
@@ -436,15 +491,19 @@ static void tuner_draw_row_callback(GContext* ctx, const Layer *cell_layer, Menu
 
 static void tuner_up_click_handler(ClickRecognizerRef recognizer, void *context) {
   if (s_tuner_edit_row != -1) {
-    switch(s_tuner_edit_row) {
-      case 1: s_settings.prefix_gap += 20; if (s_settings.prefix_gap > 800) s_settings.prefix_gap = 800; break;
-      case 2: s_settings.prefix_trim += 20; if (s_settings.prefix_trim > 800) s_settings.prefix_trim = 800; break;
-      case 3: s_settings.fuzzy_mod_gap += 20; if (s_settings.fuzzy_mod_gap > 800) s_settings.fuzzy_mod_gap = 800; break;
-      case 4: s_settings.fuzzy_conv_gap += 20; if (s_settings.fuzzy_conv_gap > 800) s_settings.fuzzy_conv_gap = 800; break;
-      case 5: s_settings.fuzzy_past_gap += 20; if (s_settings.fuzzy_past_gap > 800) s_settings.fuzzy_past_gap = 800; break;
-      case 6: s_settings.fuzzy_to_gap += 20; if (s_settings.fuzzy_to_gap > 800) s_settings.fuzzy_to_gap = 800; break;
-      case 7: s_settings.fuzzy_tight_gap += 20; if (s_settings.fuzzy_tight_gap > 800) s_settings.fuzzy_tight_gap = 800; break;
-      case 8: s_settings.fuzzy_ampm_gap += 20; if (s_settings.fuzzy_ampm_gap > 800) s_settings.fuzzy_ampm_gap = 800; break;
+    uint8_t mode = get_ui_effective_mode();
+    int row_type = s_tuner_row_map[s_tuner_edit_row];
+
+    switch(row_type) {
+      case TUNER_INTERVAL: s_settings.mode_speed[mode] += 10; if (s_settings.mode_speed[mode] > 800) s_settings.mode_speed[mode] = 800; break;
+      case TUNER_TRIM: s_settings.mode_trim[mode] += 10; if (s_settings.mode_trim[mode] > 150) s_settings.mode_trim[mode] = 150; break;
+      case TUNER_PREFIX_GAP: s_settings.prefix_gap += 10; if (s_settings.prefix_gap > 800) s_settings.prefix_gap = 800; break;
+      case TUNER_FUZZY_MOD: s_settings.fuzzy_mod_gap += 10; if (s_settings.fuzzy_mod_gap > 800) s_settings.fuzzy_mod_gap = 800; break;
+      case TUNER_FUZZY_CONV: s_settings.fuzzy_conv_gap += 10; if (s_settings.fuzzy_conv_gap > 800) s_settings.fuzzy_conv_gap = 800; break;
+      case TUNER_FUZZY_PAST: s_settings.fuzzy_past_gap += 10; if (s_settings.fuzzy_past_gap > 800) s_settings.fuzzy_past_gap = 800; break;
+      case TUNER_FUZZY_TO: s_settings.fuzzy_to_gap += 10; if (s_settings.fuzzy_to_gap > 800) s_settings.fuzzy_to_gap = 800; break;
+      case TUNER_FUZZY_TIGHT: s_settings.fuzzy_tight_gap += 10; if (s_settings.fuzzy_tight_gap > 800) s_settings.fuzzy_tight_gap = 800; break;
+      case TUNER_FUZZY_AMPM: s_settings.fuzzy_ampm_gap += 10; if (s_settings.fuzzy_ampm_gap > 800) s_settings.fuzzy_ampm_gap = 800; break;
     }
     update_tuner_ui_only();
   } else {
@@ -454,15 +513,19 @@ static void tuner_up_click_handler(ClickRecognizerRef recognizer, void *context)
 
 static void tuner_down_click_handler(ClickRecognizerRef recognizer, void *context) {
   if (s_tuner_edit_row != -1) {
-    switch(s_tuner_edit_row) {
-      case 1: s_settings.prefix_gap -= 20; if (s_settings.prefix_gap < -800) s_settings.prefix_gap = -800; break;
-      case 2: s_settings.prefix_trim -= 20; if (s_settings.prefix_trim < 0) s_settings.prefix_trim = 0; break;
-      case 3: s_settings.fuzzy_mod_gap -= 20; if (s_settings.fuzzy_mod_gap < -800) s_settings.fuzzy_mod_gap = -800; break;
-      case 4: s_settings.fuzzy_conv_gap -= 20; if (s_settings.fuzzy_conv_gap < -800) s_settings.fuzzy_conv_gap = -800; break;
-      case 5: s_settings.fuzzy_past_gap -= 20; if (s_settings.fuzzy_past_gap < -800) s_settings.fuzzy_past_gap = -800; break;
-      case 6: s_settings.fuzzy_to_gap -= 20; if (s_settings.fuzzy_to_gap < -800) s_settings.fuzzy_to_gap = -800; break;
-      case 7: s_settings.fuzzy_tight_gap -= 20; if (s_settings.fuzzy_tight_gap < -800) s_settings.fuzzy_tight_gap = -800; break;
-      case 8: s_settings.fuzzy_ampm_gap -= 20; if (s_settings.fuzzy_ampm_gap < -800) s_settings.fuzzy_ampm_gap = -800; break;
+    uint8_t mode = get_ui_effective_mode();
+    int row_type = s_tuner_row_map[s_tuner_edit_row];
+
+    switch(row_type) {
+      case TUNER_INTERVAL: s_settings.mode_speed[mode] -= 10; if (s_settings.mode_speed[mode] < -800) s_settings.mode_speed[mode] = -800; break;
+      case TUNER_TRIM: s_settings.mode_trim[mode] -= 10; if (s_settings.mode_trim[mode] < 0) s_settings.mode_trim[mode] = 0; break;
+      case TUNER_PREFIX_GAP: s_settings.prefix_gap -= 10; if (s_settings.prefix_gap < -800) s_settings.prefix_gap = -800; break;
+      case TUNER_FUZZY_MOD: s_settings.fuzzy_mod_gap -= 10; if (s_settings.fuzzy_mod_gap < -800) s_settings.fuzzy_mod_gap = -800; break;
+      case TUNER_FUZZY_CONV: s_settings.fuzzy_conv_gap -= 10; if (s_settings.fuzzy_conv_gap < -800) s_settings.fuzzy_conv_gap = -800; break;
+      case TUNER_FUZZY_PAST: s_settings.fuzzy_past_gap -= 10; if (s_settings.fuzzy_past_gap < -800) s_settings.fuzzy_past_gap = -800; break;
+      case TUNER_FUZZY_TO: s_settings.fuzzy_to_gap -= 10; if (s_settings.fuzzy_to_gap < -800) s_settings.fuzzy_to_gap = -800; break;
+      case TUNER_FUZZY_TIGHT: s_settings.fuzzy_tight_gap -= 10; if (s_settings.fuzzy_tight_gap < -800) s_settings.fuzzy_tight_gap = -800; break;
+      case TUNER_FUZZY_AMPM: s_settings.fuzzy_ampm_gap -= 10; if (s_settings.fuzzy_ampm_gap < -800) s_settings.fuzzy_ampm_gap = -800; break;
     }
     update_tuner_ui_only();
   } else {
@@ -472,19 +535,25 @@ static void tuner_down_click_handler(ClickRecognizerRef recognizer, void *contex
 
 static void tuner_select_click_handler(ClickRecognizerRef recognizer, void *context) {
   MenuIndex idx = menu_layer_get_selected_index(s_tuner_menu_layer);
+  int row_type = s_tuner_row_map[idx.row];
 
-  if (idx.row == 0) {
+  if (row_type == TUNER_TEST_AUDIO) {
     test_audio_callback(0, NULL);
   }
-  else if (idx.row == 9) {
-    s_settings.prefix_gap = 0;
-    s_settings.prefix_trim = 0;
-    s_settings.fuzzy_mod_gap = 0;
-    s_settings.fuzzy_conv_gap = 0;
-    s_settings.fuzzy_past_gap = 0;
-    s_settings.fuzzy_to_gap = 0;
-    s_settings.fuzzy_tight_gap = 0;
-    s_settings.fuzzy_ampm_gap = 0;
+  else if (row_type == TUNER_RESET) {
+    uint8_t mode = get_ui_effective_mode();
+    s_settings.mode_speed[mode] = -20;
+    s_settings.mode_trim[mode] = 0;
+
+    if (mode == MODE_FUZZY || mode == MODE_COLLOQUIAL) {
+      s_settings.fuzzy_mod_gap = -20;
+      s_settings.fuzzy_conv_gap = -20;
+      s_settings.fuzzy_past_gap = -20;
+      s_settings.fuzzy_to_gap = -20;
+      s_settings.fuzzy_tight_gap = -20;
+      s_settings.fuzzy_ampm_gap = -20;
+    }
+    s_settings.prefix_gap = -20;
 
     s_tuner_edit_row = -1;
     update_tuner_and_save();
@@ -522,17 +591,23 @@ static void tuner_window_appear(Window *window) {
   #ifdef PBL_TOUCH
   if (touch_service_is_enabled()) touch_service_subscribe(tuner_touch_handler, NULL);
   #endif
+  gesture_engine_pause();
 }
 
 static void tuner_window_disappear(Window *window) {
   #ifdef PBL_TOUCH
   touch_service_unsubscribe();
   #endif
+  if (s_settings.enable_experimental_features) {
+    gesture_engine_resume();
+  }
 }
 
 static void tuner_window_load(Window *window) {
   Layer *window_layer = window_get_root_layer(window);
   GRect bounds = layer_get_bounds(window_layer);
+
+  build_tuner_items();
 
   s_tuner_menu_layer = menu_layer_create(bounds);
   menu_layer_set_callbacks(s_tuner_menu_layer, NULL, (MenuLayerCallbacks){
@@ -575,6 +650,7 @@ static void open_tuner_callback(int index, void *context) {
       .unload = tuner_window_unload
     });
   }
+  build_tuner_items();
   window_stack_push(s_tuner_window, true);
 }
 
@@ -583,8 +659,8 @@ static void open_tuner_callback(int index, void *context) {
 // STANDARD SETTINGS TOGGLE CALLBACKS
 // -----------------------------------------------------------------------------
 
-static void toggle_beta_callback(int index, void *context) {
-  s_settings.enable_beta_features = !s_settings.enable_beta_features;
+static void toggle_experimental_callback(int index, void *context) {
+  s_settings.enable_experimental_features = !s_settings.enable_experimental_features;
   update_menu_and_save();
 }
 
@@ -599,6 +675,16 @@ static void confirm_select_click_handler(ClickRecognizerRef recognizer, void *co
 
 static void confirm_click_config_provider(void *context) {
   window_single_click_subscribe(BUTTON_ID_SELECT, confirm_select_click_handler);
+}
+
+static void confirm_window_appear(Window *window) {
+  gesture_engine_pause();
+}
+
+static void confirm_window_disappear(Window *window) {
+  if (s_settings.enable_experimental_features) {
+    gesture_engine_resume();
+  }
 }
 
 static void confirm_window_load(Window *window) {
@@ -625,7 +711,12 @@ static void confirm_window_unload(Window *window) {
 void push_reset_confirmation_window() {
   if (!s_confirm_window) {
     s_confirm_window = window_create();
-    window_set_window_handlers(s_confirm_window, (WindowHandlers) { .load = confirm_window_load, .unload = confirm_window_unload });
+    window_set_window_handlers(s_confirm_window, (WindowHandlers) {
+      .load = confirm_window_load,
+      .appear = confirm_window_appear,
+      .disappear = confirm_window_disappear,
+      .unload = confirm_window_unload
+    });
     window_set_click_config_provider(s_confirm_window, confirm_click_config_provider);
   }
   window_stack_push(s_confirm_window, true);
@@ -695,9 +786,6 @@ static void build_menu_items() {
   if (s_settings.night_volume == 0) snprintf(s_night_volume_text, sizeof(s_night_volume_text), "Level: MUTE");
   else snprintf(s_night_volume_text, sizeof(s_night_volume_text), "Level: %d%%", s_settings.night_volume);
 
-  snprintf(s_speed_text, sizeof(s_speed_text), "Interval: %d ms", s_settings.playback_speed);
-  snprintf(s_trim_text, sizeof(s_trim_text), "Trim End: %d ms", s_settings.clip_trim);
-
   char *clock_text = "Digital 12-Hour";
   if (s_settings.clock_mode == MODE_24H_MILITARY) clock_text = "Military 24-Hour";
   else if (s_settings.clock_mode == MODE_24H_CIVILIAN) clock_text = "Civilian 24-Hour";
@@ -728,8 +816,8 @@ static void build_menu_items() {
     s_menu_items[i++] = (SimpleMenuItem) { .title = "Night End", .subtitle = s_quiet_end_text, .callback = NULL };
     s_menu_items[i++] = (SimpleMenuItem) { .title = "Night Volume", .subtitle = s_night_volume_text, .callback = NULL };
 
-    // FIX: Night Worker correctly obeys the beta features toggle
-    if (s_settings.enable_beta_features) {
+    // FIX: Night Worker correctly obeys the experimental features toggle
+    if (s_settings.enable_experimental_features) {
       s_menu_items[i++] = (SimpleMenuItem) { .title = "Night Worker", .subtitle = s_settings.night_worker_sleep ? "SLEEP (Battery)" : "AWAKE (Gestures)", .callback = toggle_night_worker_callback };
     }
   }
@@ -768,23 +856,18 @@ static void build_menu_items() {
         s_menu_items[i++] = (SimpleMenuItem) { .title = "Phrase Dialect", .subtitle = s_settings.is_us_dialect ? "US (Till/After)" : "UK (To/Past)", .callback = toggle_dialect_callback };
       }
 
-      // --- PACING AND TRIM ---
-      s_menu_items[i++] = (SimpleMenuItem) { .title = "Voice Interval", .subtitle = s_speed_text, .callback = NULL };
-      s_menu_items[i++] = (SimpleMenuItem) { .title = "Audio Trim", .subtitle = s_trim_text, .callback = NULL };
+      // --- PACING AND TRIM (NOW SUBMENU FOR ALL MODES) ---
+      s_menu_items[i++] = (SimpleMenuItem) { .title = "Speech Pacing Tuner", .subtitle = "Mode-specific tweaks", .callback = open_tuner_callback };
       s_menu_items[i++] = (SimpleMenuItem) { .title = "About / Help", .subtitle = "Instructions & Info", .callback = show_about_callback };
 
       // --- EXPERIMENTAL SETTINGS ---
       s_menu_items[i++] = (SimpleMenuItem) {
         .title = "Experimental Features",
-        .subtitle = s_settings.enable_beta_features ? "ON: Config & Physics" : "OFF: Quick Launch Only",
-        .callback = toggle_beta_callback
+        .subtitle = s_settings.enable_experimental_features ? "ON: Config & Physics" : "OFF: Quick Launch Only",
+        .callback = toggle_experimental_callback
       };
 
-      if (s_settings.enable_beta_features) {
-        if (s_settings.clock_mode == MODE_COLLOQUIAL || s_settings.clock_mode == MODE_FUZZY) {
-          s_menu_items[i++] = (SimpleMenuItem) { .title = "Fuzzy Pacing Tuner", .subtitle = "Live audio calibration", .callback = open_tuner_callback };
-        }
-
+      if (s_settings.enable_experimental_features) {
         char *gesture_text = "Default Flick";
         if (s_settings.gesture_mode == 1) gesture_text = "Tap Glass";
         else if (s_settings.gesture_mode == 2) gesture_text = "Custom Axes";
@@ -969,7 +1052,7 @@ static void tuner_touch_handler(const TouchEvent *event, void *context) {
 
       GPoint offset = scroll_layer_get_content_offset(scroll_layer);
       int16_t content_y = local_y - offset.y;
-      int total_rows = 10;
+      int total_rows = s_tuner_num_rows;
       int16_t header_height = UI_HEADER_HEIGHT;
       int16_t row_height = UI_ROW_HEIGHT;
 
@@ -1077,12 +1160,16 @@ static void about_window_appear(Window *window) {
   #ifdef PBL_TOUCH
   if (touch_service_is_enabled()) touch_service_subscribe(about_touch_handler, NULL);
   #endif
+  gesture_engine_pause();
 }
 
 static void about_window_disappear(Window *window) {
   #ifdef PBL_TOUCH
   touch_service_unsubscribe();
   #endif
+  if (s_settings.enable_experimental_features) {
+    gesture_engine_resume();
+  }
 }
 
 static void about_window_unload(Window *window) {
@@ -1325,7 +1412,9 @@ static void speaking_window_appear(Window *window) {
 static void speaking_window_disappear(Window *window) {
   tick_timer_service_unsubscribe();
 
-  gesture_engine_resume();
+  if (s_settings.enable_experimental_features) {
+    gesture_engine_resume();
+  }
 }
 
 static void speaking_window_unload(Window *window) {
@@ -1358,7 +1447,7 @@ static void speaking_window_unload(Window *window) {
   }
 }
 
-void show_speaking_graphic() {
+void show_speaking_graphic(void) {
   light_enable(false);
   if (!s_speaking_window) {
     s_speaking_window = window_create();
@@ -1368,7 +1457,7 @@ void show_speaking_graphic() {
   window_stack_push(s_speaking_window, true);
 }
 
-void hide_speaking_graphic() {
+void hide_speaking_graphic(void) {
   if (s_speaking_window) window_stack_remove(s_speaking_window, true);
 }
 
@@ -1406,12 +1495,16 @@ static void menu_window_appear(Window *window) {
   #ifdef PBL_TOUCH
   if (touch_service_is_enabled()) touch_service_subscribe(menu_touch_handler, NULL);
   #endif
+  gesture_engine_pause();
 }
 
 static void menu_window_disappear(Window *window) {
   #ifdef PBL_TOUCH
   touch_service_unsubscribe();
   #endif
+  if (s_settings.enable_experimental_features) {
+    gesture_engine_resume();
+  }
 }
 
 static void menu_window_unload(Window *window) {
@@ -1429,7 +1522,7 @@ static void menu_window_unload(Window *window) {
   save_settings();
 }
 
-void settings_window_push() {
+void settings_window_push(void) {
   if (!s_menu_window) {
     s_menu_window = window_create();
     window_set_window_handlers(s_menu_window, (WindowHandlers) { .load = menu_window_load, .appear = menu_window_appear, .disappear = menu_window_disappear, .unload = menu_window_unload });
@@ -1437,7 +1530,7 @@ void settings_window_push() {
   window_stack_push(s_menu_window, true);
 }
 
-void settings_deinit() {
+void settings_deinit(void) {
   if (s_tuner_window) { window_destroy(s_tuner_window); s_tuner_window = NULL; }
   if (s_confirm_window) { window_destroy(s_confirm_window); s_confirm_window = NULL; }
   if (s_about_window) { window_destroy(s_about_window); s_about_window = NULL; }

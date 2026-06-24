@@ -1,6 +1,6 @@
 {
     "name": "whisperclock",
-    "version": "1.2.2",
+    "version": "1.2.3",
     "author": "J_B",
     "ai_disclosure": "Portions of this project's v1.2 audio engine logic and settings configuration were generated and refactored with the assistance of a large language model (Gemini).",
     "dependencies": {},
