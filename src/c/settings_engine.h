@@ -70,6 +70,10 @@ typedef struct __attribute__((__packed__)) {
   // PREFIX PACING
   int16_t prefix_gap;
 
+  // OTHER TUNER VARIABLES
+  int16_t oh_glide;
+  int16_t telecom_offset;
+
 } WhisperSettings;
 
 void settings_init(void);

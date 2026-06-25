@@ -7,21 +7,19 @@
  * 2. LATENCY PRE-FIRE (30ms): The Pebble has a ~30ms file-loading latency. The playback
  * timer MUST always subtract `latency_compensation` (30ms) so the watch begins
  * loading the next audio buffer before the current one finishes.
- * 3. PLOSIVE BREATHING: The "PM" audio clip requires a split-second of silence before
- * it so the 'P' sound (a plosive) doesn't get swallowed by the preceding vowel.
- * AM/PM transitions must always use a POSITIVE gap (e.g., +25ms) against the speed.
- * 4. PHONETIC GLIDES (To/Till/After): Prepositions ending in soft sounds require
- * aggressive negative delays to fuse smoothly into the hour number.
- * 5. TELECOM DAC SPIN-UP: The `TELECOM_BEEP_CORRECTION_MS` (250ms) must be preserved.
+ * 3. DYNAMIC PACING & PLOSIVES: Phonetic glides (like "To/Till/After" or the 'P' in PM)
+ * are NO LONGER HARDCODED. They must ALWAYS be routed through their respective
+ * Pacing Tuner variables (e.g., `s_settings.fuzzy_ampm_gap`, `s_settings.fuzzy_to_gap`).
+ * 4. TELECOM DAC SPIN-UP: The `TELECOM_BEEP_CORRECTION_MS` (250ms) must be preserved.
  * It accounts for the physical time it takes the DAC to wake up from sleep before
  * playing the exact top-of-the-hour beep. The beep.wav file has 250ms of silence.
- * 6. BEEP VOLUME SPOOF: Pure sine waves lack the physical energy to push the speaker
+ * 5. BEEP VOLUME SPOOF: Pure sine waves lack the physical energy to push the speaker
  * membrane at low volumes. The engine temporarily spoofs `s_settings.volume` to a
  * minimum of 60% right before playing the beep, and restores it via timer afterward.
- * 7. AMPLIFIER POP PREVENTION: NEVER call `speaker_cancel()` immediately before
+ * 6. AMPLIFIER POP PREVENTION: NEVER call `speaker_cancel()` immediately before
  * playing the telecom beep. It will power down the physical amplifier, causing an
  * audible "click" and swallowing the actual beep.wav file while the DAC spins back up.
- * 8. VISUALIZER SYNC: The audio engine explicitly calls `start_visualizer_for_clip()`
+ * 7. VISUALIZER SYNC: The audio engine explicitly calls `start_visualizer_for_clip()`
  * passing the exact duration of the audio clip to keep the UI perfectly synced.
  * =====================================================================================
  */
@@ -123,7 +121,7 @@ static void append_prefix(uint8_t prefix) {
 
 static void build_12h_digital(uint8_t h, uint8_t m, bool use_ampm) {
   int16_t std_delay = 0;
-  int16_t ampm_delay = -get_current_speed() + 25;
+  int16_t ampm_delay = s_settings.fuzzy_ampm_gap;
   int16_t ampm_trim = 0;
 
   if (m == 0 && h == 0) {
@@ -143,7 +141,7 @@ static void build_12h_digital(uint8_t h, uint8_t m, bool use_ampm) {
   if (m == 0) {
     queue_audio_ext("oclock.wav", "O'clock", use_ampm ? ampm_delay : 0, ampm_trim);
   } else if (m < 10) {
-    queue_audio_ext("oh.wav", "Oh", std_delay, 0);
+    queue_audio_ext("oh.wav", "Oh", s_settings.oh_glide, 0);
     queue_number_ext(m, use_ampm ? ampm_delay : std_delay, use_ampm ? ampm_trim : 0);
   } else {
     queue_complex_number(m, use_ampm ? ampm_delay : std_delay, use_ampm ? ampm_trim : 0);
@@ -187,7 +185,7 @@ static void build_24h_civilian(uint8_t h, uint8_t m, bool say_hours) {
   }
 
   if (h < 10) {
-    queue_audio_ext("oh.wav", "Oh", std_delay, 0);
+    queue_audio_ext("oh.wav", "Oh", s_settings.oh_glide, 0);
     queue_number_ext(h, std_delay, 0);
   } else {
     queue_complex_number(h, std_delay, 0);
@@ -196,7 +194,7 @@ static void build_24h_civilian(uint8_t h, uint8_t m, bool say_hours) {
   if (m == 0) {
     if (h != 0) queue_audio_ext("hundred.wav", "Hundred", say_hours ? std_delay : std_delay, 0);
   } else if (m < 10) {
-    queue_audio_ext("oh.wav", "Oh", std_delay, 0);
+    queue_audio_ext("oh.wav", "Oh", s_settings.oh_glide, 0);
     queue_number_ext(m, say_hours ? std_delay : std_delay, 0);
   } else {
     queue_complex_number(m, say_hours ? std_delay : std_delay, 0);
@@ -358,8 +356,9 @@ static uint32_t get_playlist_duration_estimate() {
 static void internal_build_telecom(struct tm *t) {
   queue_audio("at_the_tone.wav", "At the tone");
 
-  queue_complex_number(t->tm_hour, 250, 0);
-  queue_audio_ext((t->tm_hour == 1) ? "hour.wav" : "hours.wav", (t->tm_hour == 1) ? "Hour" : "Hours", 0, 0);
+  // FIX: Converted the hardcoded 250ms gap to scale dynamically with the user's base speed
+  queue_complex_number(t->tm_hour, get_current_speed() + 250, 0);
+  queue_audio_ext((t->tm_hour == 1) ? "hour.wav" : "Hours", (t->tm_hour == 1) ? "Hour" : "Hours", 0, 0);
 
   if (t->tm_sec == 0) {
     if (t->tm_min > 0) {
@@ -556,6 +555,9 @@ void trigger_playback(bool auto_exit) {
     time_ms(&now_sec, &now_ms);
 
     int32_t beep_wait = (s_telecom_target_sec - now_sec) * 1000 - now_ms + TELECOM_BEEP_CORRECTION_MS;
+
+    beep_wait += s_settings.telecom_offset;
+
     if (beep_wait > 0) {
       s_beep_timer = app_timer_register(beep_wait, telecom_beep_callback, NULL);
     } else {

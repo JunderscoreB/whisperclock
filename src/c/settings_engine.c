@@ -70,16 +70,18 @@ enum TunerRowType {
   TUNER_INTERVAL,
   TUNER_TRIM,
   TUNER_PREFIX_GAP,
+  TUNER_OH_GLIDE,        // NEW: Oh Glide
   TUNER_FUZZY_MOD,
   TUNER_FUZZY_CONV,
   TUNER_FUZZY_PAST,
   TUNER_FUZZY_TO,
   TUNER_FUZZY_TIGHT,
   TUNER_FUZZY_AMPM,
+  TUNER_TELECOM_OFFSET,  // NEW: Telecom Offset
   TUNER_RESET
 };
 
-static int s_tuner_row_map[12];
+static int s_tuner_row_map[13];
 static int s_tuner_num_rows = 0;
 
 static char s_volume_text[16];
@@ -155,16 +157,32 @@ static void build_tuner_items(void) {
     s_tuner_row_map[s_tuner_num_rows++] = TUNER_PREFIX_GAP;
   }
 
-  // Show these advanced gaps if currently in Fuzzy OR Colloquial Mode
-  if (mode == MODE_FUZZY || mode == MODE_COLLOQUIAL) {
+  // Show "Oh" Glide for modes that inject "Oh"
+  if (mode == MODE_12H_DIGITAL || mode == MODE_24H_CIVILIAN) {
+    s_tuner_row_map[s_tuner_num_rows++] = TUNER_OH_GLIDE;
+  }
+
+  // Show Fuzzy exclusive gaps ONLY in Fuzzy Mode
+  if (mode == MODE_FUZZY) {
     s_tuner_row_map[s_tuner_num_rows++] = TUNER_FUZZY_MOD;
     s_tuner_row_map[s_tuner_num_rows++] = TUNER_FUZZY_CONV;
+  }
+
+  // Show shared phonetic glides in BOTH Fuzzy and Colloquial Modes
+  if (mode == MODE_FUZZY || mode == MODE_COLLOQUIAL) {
     s_tuner_row_map[s_tuner_num_rows++] = TUNER_FUZZY_PAST;
     s_tuner_row_map[s_tuner_num_rows++] = TUNER_FUZZY_TO;
     s_tuner_row_map[s_tuner_num_rows++] = TUNER_FUZZY_TIGHT;
-    if (s_settings.say_ampm) {
-      s_tuner_row_map[s_tuner_num_rows++] = TUNER_FUZZY_AMPM;
-    }
+  }
+
+  // Fix: AM/PM Blending unhidden for Digital 12-Hour
+  if ((mode == MODE_12H_DIGITAL || mode == MODE_FUZZY || mode == MODE_COLLOQUIAL) && s_settings.say_ampm) {
+    s_tuner_row_map[s_tuner_num_rows++] = TUNER_FUZZY_AMPM;
+  }
+
+  // Show Telecom Offset exclusively in Telecom Mode
+  if (mode == MODE_TELECOM) {
+    s_tuner_row_map[s_tuner_num_rows++] = TUNER_TELECOM_OFFSET;
   }
 
   s_tuner_row_map[s_tuner_num_rows++] = TUNER_RESET;
@@ -225,9 +243,14 @@ void settings_init() {
   s_settings.fuzzy_ampm_gap = -20;
   s_settings.prefix_gap = -20;
 
+  // New Variable Defaults
+  s_settings.oh_glide = -20;
+  s_settings.telecom_offset = 0;
+
   if (persist_exists(SETTINGS_PERSIST_KEY)) {
     WhisperSettings temp_settings;
     int bytes = persist_read_data(SETTINGS_PERSIST_KEY, &temp_settings, sizeof(WhisperSettings));
+    // Size check ensures old app saves default the new variables properly
     if (bytes == sizeof(WhisperSettings)) {
       s_settings = temp_settings;
     }
@@ -464,6 +487,8 @@ static void tuner_draw_row_callback(GContext* ctx, const Layer *cell_layer, Menu
       strcpy(title, "Audio Trim"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.mode_trim[mode]); break;
     case TUNER_PREFIX_GAP:
       strcpy(title, "Prefix Gap"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.prefix_gap); break;
+    case TUNER_OH_GLIDE:
+      strcpy(title, "'Oh' Glide"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.oh_glide); break;
     case TUNER_FUZZY_MOD:
       strcpy(title, "Almost/Just After"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.fuzzy_mod_gap); break;
     case TUNER_FUZZY_CONV:
@@ -476,6 +501,8 @@ static void tuner_draw_row_callback(GContext* ctx, const Layer *cell_layer, Menu
       strcpy(title, "Hour Snapping"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.fuzzy_tight_gap); break;
     case TUNER_FUZZY_AMPM:
       strcpy(title, "AM / PM Blending"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.fuzzy_ampm_gap); break;
+    case TUNER_TELECOM_OFFSET:
+      strcpy(title, "Tone Offset"); snprintf(subtitle, sizeof(subtitle), "%d ms", s_settings.telecom_offset); break;
     case TUNER_RESET:
       strcpy(title, "Reset Defaults"); strcpy(subtitle, "Clear pacing for mode"); break;
   }
@@ -498,12 +525,14 @@ static void tuner_up_click_handler(ClickRecognizerRef recognizer, void *context)
       case TUNER_INTERVAL: s_settings.mode_speed[mode] += 10; if (s_settings.mode_speed[mode] > 800) s_settings.mode_speed[mode] = 800; break;
       case TUNER_TRIM: s_settings.mode_trim[mode] += 10; if (s_settings.mode_trim[mode] > 150) s_settings.mode_trim[mode] = 150; break;
       case TUNER_PREFIX_GAP: s_settings.prefix_gap += 10; if (s_settings.prefix_gap > 800) s_settings.prefix_gap = 800; break;
+      case TUNER_OH_GLIDE: s_settings.oh_glide += 10; if (s_settings.oh_glide > 800) s_settings.oh_glide = 800; break;
       case TUNER_FUZZY_MOD: s_settings.fuzzy_mod_gap += 10; if (s_settings.fuzzy_mod_gap > 800) s_settings.fuzzy_mod_gap = 800; break;
       case TUNER_FUZZY_CONV: s_settings.fuzzy_conv_gap += 10; if (s_settings.fuzzy_conv_gap > 800) s_settings.fuzzy_conv_gap = 800; break;
       case TUNER_FUZZY_PAST: s_settings.fuzzy_past_gap += 10; if (s_settings.fuzzy_past_gap > 800) s_settings.fuzzy_past_gap = 800; break;
       case TUNER_FUZZY_TO: s_settings.fuzzy_to_gap += 10; if (s_settings.fuzzy_to_gap > 800) s_settings.fuzzy_to_gap = 800; break;
       case TUNER_FUZZY_TIGHT: s_settings.fuzzy_tight_gap += 10; if (s_settings.fuzzy_tight_gap > 800) s_settings.fuzzy_tight_gap = 800; break;
       case TUNER_FUZZY_AMPM: s_settings.fuzzy_ampm_gap += 10; if (s_settings.fuzzy_ampm_gap > 800) s_settings.fuzzy_ampm_gap = 800; break;
+      case TUNER_TELECOM_OFFSET: s_settings.telecom_offset += 5; if (s_settings.telecom_offset > 800) s_settings.telecom_offset = 800; break;
     }
     update_tuner_ui_only();
   } else {
@@ -520,12 +549,14 @@ static void tuner_down_click_handler(ClickRecognizerRef recognizer, void *contex
       case TUNER_INTERVAL: s_settings.mode_speed[mode] -= 10; if (s_settings.mode_speed[mode] < -800) s_settings.mode_speed[mode] = -800; break;
       case TUNER_TRIM: s_settings.mode_trim[mode] -= 10; if (s_settings.mode_trim[mode] < 0) s_settings.mode_trim[mode] = 0; break;
       case TUNER_PREFIX_GAP: s_settings.prefix_gap -= 10; if (s_settings.prefix_gap < -800) s_settings.prefix_gap = -800; break;
+      case TUNER_OH_GLIDE: s_settings.oh_glide -= 10; if (s_settings.oh_glide < -800) s_settings.oh_glide = -800; break;
       case TUNER_FUZZY_MOD: s_settings.fuzzy_mod_gap -= 10; if (s_settings.fuzzy_mod_gap < -800) s_settings.fuzzy_mod_gap = -800; break;
       case TUNER_FUZZY_CONV: s_settings.fuzzy_conv_gap -= 10; if (s_settings.fuzzy_conv_gap < -800) s_settings.fuzzy_conv_gap = -800; break;
       case TUNER_FUZZY_PAST: s_settings.fuzzy_past_gap -= 10; if (s_settings.fuzzy_past_gap < -800) s_settings.fuzzy_past_gap = -800; break;
       case TUNER_FUZZY_TO: s_settings.fuzzy_to_gap -= 10; if (s_settings.fuzzy_to_gap < -800) s_settings.fuzzy_to_gap = -800; break;
       case TUNER_FUZZY_TIGHT: s_settings.fuzzy_tight_gap -= 10; if (s_settings.fuzzy_tight_gap < -800) s_settings.fuzzy_tight_gap = -800; break;
       case TUNER_FUZZY_AMPM: s_settings.fuzzy_ampm_gap -= 10; if (s_settings.fuzzy_ampm_gap < -800) s_settings.fuzzy_ampm_gap = -800; break;
+      case TUNER_TELECOM_OFFSET: s_settings.telecom_offset -= 5; if (s_settings.telecom_offset < -800) s_settings.telecom_offset = -800; break;
     }
     update_tuner_ui_only();
   } else {
@@ -544,16 +575,23 @@ static void tuner_select_click_handler(ClickRecognizerRef recognizer, void *cont
     uint8_t mode = get_ui_effective_mode();
     s_settings.mode_speed[mode] = -20;
     s_settings.mode_trim[mode] = 0;
+    s_settings.prefix_gap = -20;
 
-    if (mode == MODE_FUZZY || mode == MODE_COLLOQUIAL) {
+    // Reset targeted variables
+    if (mode == MODE_12H_DIGITAL || mode == MODE_24H_CIVILIAN) s_settings.oh_glide = -20;
+    if (mode == MODE_TELECOM) s_settings.telecom_offset = 0;
+
+    if (mode == MODE_FUZZY) {
       s_settings.fuzzy_mod_gap = -20;
       s_settings.fuzzy_conv_gap = -20;
+    }
+
+    if (mode == MODE_12H_DIGITAL || mode == MODE_FUZZY || mode == MODE_COLLOQUIAL) {
       s_settings.fuzzy_past_gap = -20;
       s_settings.fuzzy_to_gap = -20;
       s_settings.fuzzy_tight_gap = -20;
       s_settings.fuzzy_ampm_gap = -20;
     }
-    s_settings.prefix_gap = -20;
 
     s_tuner_edit_row = -1;
     update_tuner_and_save();
