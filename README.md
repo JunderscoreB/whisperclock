@@ -41,13 +41,20 @@ To get the true WhisperClock experience, map it to a physical hardware button:
 Launch WhisperClock normally from your Pebble's main app menu to configure your playback experience. Because Pebble audio can vary heavily depending on the recording, these DSP tools allow you to tune the voice to your exact preference:
 
 * **Clock Modes:** Choose exactly how you want the time read to you:
+
   * **System Default:** Automatically mirrors your Pebble's native 12-hour or 24-hour global system settings.
+
   * **12-Hour Digital:** Standard AM/PM readout (e.g., "Five Oh Five PM").
+
   * **24-Hour Military:** Zero-padded military format (e.g., "Zero Five Hundred Hours").
+
   * **24-Hour Civilian:** 24-hour style without the jargon (e.g., "Oh Five Oh Five").
+
   * **Colloquial:** Natural human phrasing (e.g., "Quarter Past Five").
+
   * **Telecom Radio:** Vintage time station readout that calculates future bounds to play an exact top-of-the-minute tone (e.g., "At the tone, it will be 10 hours, 12 minutes, precisely... *BEEP*").
-  * **Fuzzy:** Casual 15-minute rounding anchors (e.g., "Almost a quarter to five", "Just after half past eight").
+
+  * **Fuzzy:** Casual rounding (e.g., "Almost quarter to five").
 
 * **Phrase Dialect:** Toggle between US ("Till/After") and UK ("To/Past") phrasing for Colloquial and Fuzzy modes.
 
@@ -57,7 +64,7 @@ Launch WhisperClock normally from your Pebble's main app menu to configure your 
 
 * **True Bedside Mode (Quiet Time):** Set custom Night Start and Night End hours to automatically lower the volume, mute the app, or put the background physics worker to sleep while you are in bed. Quiet Time dynamically routes your volume independently of the gesture engine, allowing your watch to stay perfectly silent during the day but whisper softly at night.
 
-* **Fuzzy Pacing Tuner:** A dedicated calibration board allowing you to tune the exact millisecond gaps, trims, and glides between words for natural-sounding fractions and conversions.
+* **Independent Speech Pacing Tuner:** A dedicated calibration board allowing you to tune the exact millisecond gaps, trims, and glides between words independently for each clock mode. Finding the perfect conversational glide in Colloquial Mode will no longer break the snappy pacing of your Military Mode!
 
 ## 🧪 The Experimental Physics Engine (Gestures & Tapping)
 
@@ -113,7 +120,7 @@ If you are interested in translating the app and recording a voice pack, please 
 
 * **Firmware Volume Override:** The PebbleOS `speaker_stream_open` API currently ignores volume parameters and defaults to 100% hardware gain. WhisperClock handles your volume preference purely in software to bypass this, but the hardware amplifier is still fully pressurized during playback.
 
-* **Beta Physics Battery Drain:** Using the standard "Quick Launch" method uses 0% background battery. However, enabling the Beta Gestures & Tapping requires the Pebble to keep its background worker and accelerometer running at 25Hz. This will have a minor but noticeable impact on your smartwatch's multi-day battery life.
+* **Experimental Physics Battery Drain:** Using the standard "Quick Launch" method uses 0% background battery. However, enabling the Experimental Gestures & Tapping requires the Pebble to keep its background worker and accelerometer running at 25Hz. This will have a minor but noticeable impact on your smartwatch's multi-day battery life.
 
 ## ⚖️ License & Credits
 
